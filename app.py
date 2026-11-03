@@ -2,8 +2,7 @@
 import sys
 import threading
 
-# Wajib sebelum PySide6: stt membuat ThreadPoolExecutor saat diimpor, dan di
-# Python 3.15 impor sesudah PySide6 menghasilkan 'lazy_import' tak terpanggil.
+# stt kebal urutan impor (lihat stt.py); impor awal di sini hanya kejelasan.
 import audio
 import brain as brain_mod
 import config

@@ -9,8 +9,8 @@ import asyncio
 import threading
 import unittest
 
-import stt  # impor sebelum PySide6, sama seperti app.py
-import PySide6.QtWidgets  # noqa: F401  (memicu kondisi aslinya)
+import PySide6.QtWidgets  # noqa: F401  (urutan exe beku: Qt selalu lebih dulu)
+import stt
 
 
 async def _dns_probe():

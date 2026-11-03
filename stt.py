@@ -1,8 +1,18 @@
 """Klien streaming Muse Voice Transcribe (WebSocket realtime Meta)."""
 import asyncio
-import concurrent.futures
 import json
 import threading
+# Impor langsung dari submodul: memaksa resolusi nyata. Akses atribut
+# `concurrent.futures.ThreadPoolExecutor` sesudah PySide6 diimpor (selalu
+# terjadi di exe PyInstaller) menghasilkan objek lazy_import yang tidak
+# bisa dipanggil dan mematikan DNS asyncio di thread pekerja.
+from concurrent.futures.thread import ThreadPoolExecutor
+
+import concurrent.futures as _futures_pkg
+
+# asyncio memeriksa isinstance(executor, concurrent.futures.ThreadPoolExecutor)
+# lewat atribut paket yang masih lazy; tanam kelas nyatanya ke paket.
+_futures_pkg.ThreadPoolExecutor = ThreadPoolExecutor
 
 import websockets
 
@@ -10,12 +20,7 @@ import config
 
 URL = "wss://api.meta.ai/v1/asr/realtime"
 
-# Executor dibuat di thread utama saat modul diimpor. Di Python 3.15,
-# membuat ThreadPoolExecutor di dalam thread pekerja setelah PySide6
-# diimpor menghasilkan TypeError 'lazy_import' object is not callable
-# (DNS asyncio gagal total), jadi loop STT wajib memakai executor ini.
-EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-    max_workers=4, thread_name_prefix="lancarin-stt")
+EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="lancarin-stt")
 
 
 def run_event_loop(coro):
