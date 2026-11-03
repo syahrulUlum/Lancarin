@@ -12,10 +12,11 @@ class Brain:
         self.client = OpenAI(api_key=token, base_url=cfg["base_url"])
         self.model = cfg["model"]
 
-    def chat(self, system: str, user: str, max_tokens: int = 600) -> str:
+    def chat(self, system: str, user: str) -> str:
+        # Tanpa max_tokens: pada Muse Spark batas kecil dimakan proses
+        # penalaran model dan content akhir kembali kosong.
         r = self.client.chat.completions.create(
             model=self.model,
-            max_tokens=max_tokens,
             messages=[{"role": "system", "content": system},
                       {"role": "user", "content": user}],
         )
@@ -28,7 +29,7 @@ class Brain:
             f"You are a precise live interpreter. Translate from {src} to {dst}. "
             "The text may be an unfinished sentence fragment; translate what is there. "
             "Output ONLY the translation, no quotes, no notes.",
-            text, max_tokens=400,
+            text,
         )
 
     def suggest(self, context_desc: str, history: str, opponent_text: str,
@@ -42,7 +43,7 @@ class Brain:
             f"ID: <same reply translated to {my_lang}>"
         )
         user = f"Context: {context_desc or '-'}\n\nHistory:\n{history or '-'}\n\nOther person just said: {opponent_text}"
-        raw = self.chat(system, user, max_tokens=300)
+        raw = self.chat(system, user)
         en, trans = "", ""
         for line in raw.splitlines():
             if line.startswith("EN:"):
