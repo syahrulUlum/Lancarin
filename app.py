@@ -2,6 +2,14 @@
 import sys
 import threading
 
+# Wajib sebelum PySide6: stt membuat ThreadPoolExecutor saat diimpor, dan di
+# Python 3.15 impor sesudah PySide6 menghasilkan 'lazy_import' tak terpanggil.
+import audio
+import brain as brain_mod
+import config
+from session import Session
+from stt import RealtimeSTT
+
 from PySide6.QtCore import Qt, QTimer, Signal, QObject
 from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import (
@@ -9,13 +17,6 @@ from PySide6.QtWidgets import (
     QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar,
     QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
-
-import audio
-import brain as brain_mod
-import config
-from session import Session
-from stt import RealtimeSTT
-
 
 class Bridge(QObject):
     opponent_final = Signal(str)

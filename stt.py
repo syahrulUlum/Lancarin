@@ -1,5 +1,6 @@
 """Klien streaming Muse Voice Transcribe (WebSocket realtime Meta)."""
 import asyncio
+import concurrent.futures
 import json
 import threading
 
@@ -8,6 +9,23 @@ import websockets
 import config
 
 URL = "wss://api.meta.ai/v1/asr/realtime"
+
+# Executor dibuat di thread utama saat modul diimpor. Di Python 3.15,
+# membuat ThreadPoolExecutor di dalam thread pekerja setelah PySide6
+# diimpor menghasilkan TypeError 'lazy_import' object is not callable
+# (DNS asyncio gagal total), jadi loop STT wajib memakai executor ini.
+EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="lancarin-stt")
+
+
+def run_event_loop(coro):
+    """Jalankan coroutine di loop baru dengan executor bersama di atas."""
+    loop = asyncio.new_event_loop()
+    loop.set_default_executor(EXECUTOR)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 class RealtimeSTT(threading.Thread):
@@ -30,7 +48,7 @@ class RealtimeSTT(threading.Thread):
 
     def run(self):
         try:
-            asyncio.run(self._main())
+            run_event_loop(self._main())
         except Exception as exc:
             if not self._stopped.is_set():
                 self.on_error(str(exc)[:200])
