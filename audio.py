@@ -11,6 +11,19 @@ import pyaudiowpatch as pyaudio
 
 TARGET_RATE = 24000
 
+_pa_lock = threading.Lock()
+_pa_singleton = None
+
+
+def _get_pa():
+    """Satu instance PyAudio bersama: inisialisasi PortAudio serentak dari
+    beberapa thread memicu assertion natif yang mematikan proses."""
+    global _pa_singleton
+    with _pa_lock:
+        if _pa_singleton is None:
+            _pa_singleton = pyaudio.PyAudio()
+        return _pa_singleton
+
 
 def _to_pcm24(data: bytes, rate: int, channels: int) -> bytes:
     samples = np.frombuffer(data, dtype=np.float32)
@@ -25,7 +38,7 @@ def _to_pcm24(data: bytes, rate: int, channels: int) -> bytes:
 
 def list_devices():
     """Kembalikan (loopback_index, mic_index, daftar nama) untuk UI."""
-    pa = pyaudio.PyAudio()
+    pa = _get_pa()
     try:
         loopback = None
         try:
@@ -54,7 +67,7 @@ def list_devices():
                 names.append(f"device {i}")
         return loopback, mic, names
     finally:
-        pa.terminate()
+        pass  # instance bersama tidak diterminasi per panggilan
 
 
 class Capture:
@@ -75,7 +88,7 @@ class Capture:
         self._stop.set()
 
     def _run(self):
-        pa = pyaudio.PyAudio()
+        pa = _get_pa()
         stream = None
         try:
             info = pa.get_device_info_by_index(self.device_index)
@@ -92,9 +105,9 @@ class Capture:
                     self.frames.put_nowait(_to_pcm24(data, rate, channels))
                 except queue.Full:
                     pass
+        except Exception:
+            if not self._stop.is_set():
+                raise
         finally:
-            try:
-                if stream:
-                    stream.close()
-            finally:
-                pa.terminate()
+            if stream:
+                stream.close()
