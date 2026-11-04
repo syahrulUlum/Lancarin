@@ -1,4 +1,4 @@
-"""Regresi crash Mulai Sesi: dua capture serentak tidak boleh mematikan proses.
+"""Start Session crash regression: two simultaneous captures must not kill the process.
 
 Jalankan: .venv\\Scripts\\python -m unittest tests.test_audio -v
 """
@@ -15,14 +15,14 @@ class TestAudioSingleton(unittest.TestCase):
     def test_dual_capture_flows(self):
         loop, mic, _ = audio.list_devices()
         if loop is None or mic is None:
-            self.skipTest("perangkat loopback/mic tidak tersedia")
+            self.skipTest("loopback/microphone device unavailable")
         caps = [audio.Capture(loop), audio.Capture(mic)]
         for cap in caps:
             cap.start()
         time.sleep(2)
-        # Regresi yang dijaga: proses tidak crash. Loopback WASAPI tidak
-        # mengirim frame saat tidak ada audio diputar, jadi yang wajib
-        # mengalir adalah mic; loopback cukup dibuktikan thread-nya hidup.
+        # The guarded regression is a crash. WASAPI loopback sends no frames
+        # while nothing is playing, so the mic must flow and the loopback
+        # thread only has to stay alive.
         alive = [cap._thread.is_alive() for cap in caps]
         for cap in caps:
             cap.stop()

@@ -1,4 +1,4 @@
-"""Tangkap audio: loopback sistem (lawan) + mikrofon (saya) -> PCM 24 kHz mono.
+"""Audio capture: system loopback (other party) + microphone (you) -> 24 kHz mono PCM.
 
 Windows memakai WASAPI loopback via PyAudioWPatch. Perangkat non-Windows
 (monitor PipeWire/PulseAudio, BlackHole) dipilih dari daftar perangkat yang sama.
@@ -71,7 +71,7 @@ def list_devices():
 
 
 class Capture:
-    """Satu stream perangkat -> antrean potongan PCM 24 kHz (bytes)."""
+    """One device stream -> a queue of 24 kHz PCM chunks (bytes)."""
 
     def __init__(self, device_index: int, on_error=None):
         self.device_index = device_index

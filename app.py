@@ -1,11 +1,11 @@
-"""Lancarin — asisten percakapan real-time (transkripsi, terjemahan, saran AI)."""
+"""Lancarin - real-time conversation assistant (transcription, translation, AI suggestions)."""
 import html
 import sys
 import threading
 import time
 from pathlib import Path
 
-# stt kebal urutan impor (lihat lancarin/stt.py); impor awal di sini hanya kejelasan.
+# stt is import-order proof (see lancarin/stt.py); the early import is only for clarity.
 from lancarin import audio, config
 from lancarin import brain as brain_mod
 from lancarin.session import Session
@@ -25,7 +25,7 @@ class Bridge(QObject):
     opponent_final = Signal(str)
     mine_final = Signal(str)
     partial = Signal(str, str)  # who, text
-    interim = Signal(str, str)  # snapshot asli, terjemahan sementara
+    interim_chunk = Signal(str, str)  # source prefix covered, translated chunk
     suggestion = Signal(str)
     translation = Signal(str, str)  # original, translated
     summary_ready = Signal(str)
@@ -59,6 +59,9 @@ class MainWindow(QMainWindow):
         self._interim_busy = False
         self._interim_at = 0.0
         self._interim_snapshot = ""
+        self._interim_done_source = ""
+        self._interim_done_text = ""
+        self._interim_chunk_busy = False
 
         header = QLabel("Lancarin")
         header.setStyleSheet("color:#ffffff;font-size:18px;font-weight:700;")
@@ -130,6 +133,12 @@ class MainWindow(QMainWindow):
         self.private_btn.clicked.connect(self.toggle_private)
         export_btn = QPushButton("Export Transcript (.md)")
         export_btn.clicked.connect(self.export_md)
+        self.new_session_btn = QPushButton("New Session")
+        self.new_session_btn.clicked.connect(self.new_session)
+        self.summary_btn = QPushButton("View Summary")
+        self.summary_btn.setEnabled(False)
+        self.summary_btn.setToolTip("Available after a session summary has been created")
+        self.summary_btn.clicked.connect(lambda: self.summary_card.show())
         self._sess_state = "idle"
         self.session_state = QLabel("")
         self.session_state.setStyleSheet(
@@ -142,6 +151,8 @@ class MainWindow(QMainWindow):
         self.action_layout = action_row
         util_row = QHBoxLayout()
         util_row.addWidget(self.private_btn)
+        util_row.addWidget(self.new_session_btn)
+        util_row.addWidget(self.summary_btn)
         util_row.addWidget(export_btn)
         util_row.addStretch(1)
         self.util_layout = util_row
@@ -158,7 +169,7 @@ class MainWindow(QMainWindow):
         meter_row.addWidget(QLabel("You:"))
         meter_row.addWidget(self.level_mic, 1)
         lay3.addLayout(meter_row)
-        # Panel langsung pengganti overlay: lencana proses, saran, asli, terjemahan.
+        # Live panel (replaces the old overlay): process badge, suggestion, original, translation.
         self.panel_badge = QLabel("")
         self.panel_badge.setStyleSheet(
             "color:#5eead4;font-size:12px;font-weight:700;"
@@ -221,8 +232,8 @@ class MainWindow(QMainWindow):
         sum_lay.addLayout(sum_btns)
         self.summary_card.hide()
 
-        # Menu pengaturan sesi: konteks + bahasa + mode, terlipat bawaan agar
-        # kotak percakapan mendapat ruang penuh.
+        # Session setup menu: context + languages + mode, collapsed by default
+        # so the conversation panel gets the full space.
         self.settings_panel = QWidget()
         sp_lay = QVBoxLayout(self.settings_panel)
         sp_lay.setContentsMargins(0, 0, 0, 0)
@@ -247,12 +258,12 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(440, 460)
         self._wire()
 
-    # ---------- kabel sinyal & status ----------
+    # ---------- signal wiring and status ----------
     def _wire(self):
         self.bridge.opponent_final.connect(self.on_opponent)
         self.bridge.mine_final.connect(self.on_mine)
         self.bridge.partial.connect(self.on_partial)
-        self.bridge.interim.connect(self.on_interim)
+        self.bridge.interim_chunk.connect(self.on_interim_chunk)
         self.bridge.suggestion.connect(self.on_suggestion)
         self.bridge.translation.connect(self.on_translation)
         self.bridge.summary_ready.connect(self.on_summary)
@@ -288,6 +299,8 @@ class MainWindow(QMainWindow):
         for w in (self.opp_lang, self.my_lang, self.context_edit, self.keywords_edit,
                   self.mode_conversation, self.mode_translate, self.settings_btn):
             w.setEnabled(not locked)  # changing setup mid-session has no effect; say so
+        self.new_session_btn.setEnabled(not locked)
+        self.summary_btn.setEnabled(not locked and bool(getattr(self, "_last_summary", "")))
         if state == "live":
             self.start_btn.setEnabled(False)
             self.start_btn.setText("● Session Running")
@@ -313,6 +326,30 @@ class MainWindow(QMainWindow):
         arah = QBoxLayout.Direction.TopToBottom if compact else QBoxLayout.Direction.LeftToRight
         self.action_layout.setDirection(arah)
         self.util_layout.setDirection(arah)
+
+    def new_session(self):
+        if self._active:
+            return
+        if self.session.turns or getattr(self, "_last_summary", ""):
+            answer = QMessageBox.question(
+                self, "New Session",
+                "Start a new session? The current transcript and summary will be cleared. "
+                "Export the transcript first if you need to keep them.")
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        self.session = Session(self.context_edit.toPlainText().strip())
+        self._last_summary = ""
+        self.summary_text.clear()
+        self.summary_card.hide()
+        self.summary_btn.setEnabled(False)
+        self.log.clear()
+        for lab in (self.panel_suggested, self.panel_original, self.panel_translated):
+            lab.clear()
+            lab.hide()
+        self.panel_badge.hide()
+        self._reset_interim()
+        self._set_session_state("idle")
+        self.set_status("Ready - new session. Adjust Session setup or press Start Session.")
 
     def toggle_settings_panel(self):
         show = self.session_btn.isChecked()
@@ -343,7 +380,7 @@ class MainWindow(QMainWindow):
 
     def on_suggestion(self, text: str):
         self._panel_show(self.panel_suggested, text)
-        self.panel_badge.hide()  # proses AI untuk giliran ini selesai
+        self.panel_badge.hide()  # AI work for this turn is done
 
     def set_busy(self, on: bool, text: str = ""):
         self.busy_bar.setVisible(on)
@@ -381,52 +418,78 @@ class MainWindow(QMainWindow):
     def toggle_private(self):
         self.private_mode = self.private_btn.isChecked()
         if self.private_mode and self._active:
-            teks = "PRIVATE mode is on: your speech is translated only here. Keep your Zoom/Meet mic muted."
+            label_text = "PRIVATE mode is on: your speech is translated only here. Keep your Zoom/Meet mic muted."
         elif self.private_mode:
-            teks = "Private check ready - it applies while a session is live. Keep your Zoom/Meet mic muted."
+            label_text = "Private check ready - it applies while a session is live. Keep your Zoom/Meet mic muted."
         else:
-            teks = "Ready - private check off"
-        self.set_status(teks)
+            label_text = "Ready - private check off"
+        self.set_status(label_text)
 
-    # ---------- terjemahan interim (sambil lawan masih bicara) ----------
+    # ---------- interim translation (while the other party is still speaking) ----------
+    def _reset_interim(self):
+        self._interim_snapshot = ""
+        self._interim_done_source = ""
+        self._interim_done_text = ""
+        self._interim_chunk_busy = False
+
+    @staticmethod
+    def _take_chunk(pending: str):
+        """Cut the next translatable chunk: a sentence/clause, never the whole transcript."""
+        if len(pending) < 24:
+            return "", 0
+        limit = 140 if len(pending) > 220 else 60
+        window = pending[:limit]
+        cut = max(window.rfind(mark) for mark in ".?!;,")
+        if cut >= 18:
+            return pending[:cut + 1].strip(), cut + 1
+        if len(pending) <= limit:
+            return pending.strip(), len(pending)
+        space = window.rfind(" ")
+        return (pending[:space].strip(), space) if space >= 18 else ("", 0)
+
     def maybe_interim(self):
-        # Latest-wins: jangan antri di belakang panggilan lambat. Panggilan
-        # baru boleh jalan paralel; hanya hasil dari snapshot terakhir yang
-        # ditampilkan (lihat on_interim).
-        if not self._active or not self.brain:
+        # Translate only the newest chunk of the cumulative partial and append
+        # it. Re-translating the whole partial makes every call slower as the
+        # sentence grows, so during continuous speech nothing ever arrives.
+        if not self._active or not self.brain or self._interim_chunk_busy:
             return
         text = self._partial.strip()
-        if len(text) < 3 or text == self._interim_snapshot:
+        if not text:
             return
-        if time.time() - self._interim_at < 0.8:
+        if not text.startswith(self._interim_done_source):
+            self._interim_done_source, self._interim_done_text = "", ""  # STT revised earlier words
+        pending = text[len(self._interim_done_source):].lstrip()
+        base = text[:len(text) - len(pending)] if pending else text
+        segment, cut = self._take_chunk(pending)
+        if not segment:
             return
-        if len(text) - len(self._interim_snapshot) < 4 and self._interim_snapshot:
-            return
+        self._interim_chunk_busy = True
         self._interim_at = time.time()
-        self._interim_snapshot = text
+        source_upto = text[:len(text) - len(pending) + cut]
         brain, opp, mine = self.brain, self.cfg["opponent_lang"], self.cfg["my_lang"]
 
         def work():
             try:
-                hasil = brain.translate(text, opp, mine)
-                self.bridge.interim.emit(text, hasil)
+                result = brain.translate(segment, opp, mine)
+                self.bridge.interim_chunk.emit(source_upto, result)
             except Exception:
-                self.bridge.interim.emit(text, "")  # reset flag lewat thread GUI
+                self.bridge.interim_chunk.emit(source_upto, "")  # GUI thread clears the busy flag
 
         threading.Thread(target=work, daemon=True).start()
 
-    def on_interim(self, snapshot: str, translated: str):
-        self._interim_busy = False
-        # Hanya snapshot terakhir yang boleh tampil; hasil panggilan lama yang
-        # selesai belakangan dibuang agar overlay tidak mundur.
-        if snapshot != self._interim_snapshot:
+    def on_interim_chunk(self, source_upto: str, translated: str):
+        self._interim_chunk_busy = False
+        if not self._active or not translated.strip():
             return
-        if snapshot != self._partial and not self._partial.startswith(snapshot):
-            return
-        if self._active and translated.strip():
-            self._panel_show(self.panel_translated, translated)
+        if not self._partial.startswith(source_upto):
+            return  # stale: the transcript moved on or was revised
+        if self._interim_done_source and not source_upto.startswith(self._interim_done_source):
+            return  # an older chunk finishing out of order
+        self._interim_done_source = source_upto
+        self._interim_done_text = (self._interim_done_text + " " + translated.strip()).strip()
+        self._panel_show(self.panel_translated, self._interim_done_text)
 
-    # ---------- siklus sesi ----------
+    # ---------- session lifecycle ----------
     def start_session(self):
         token = config.get_token()
         if not token:
@@ -479,7 +542,7 @@ class MainWindow(QMainWindow):
             s.start()
         self._active = True
         self._partial = ""
-        self._interim_snapshot = ""
+        self._reset_interim()
         self._set_session_state("live")
         self.set_busy(False)
         self.set_status(f"Session live - translating {opp} → {mine}")
@@ -494,9 +557,9 @@ class MainWindow(QMainWindow):
 
     def on_opponent(self, text):
         if not self._active:
-            return  # final terlambat dari stream sesi lama
+            return  # late final from a previous session's stream
         self._partial = ""
-        self._interim_snapshot = ""
+        self._reset_interim()
         self.panel_badge.hide()
         opp, mine = self.cfg["opponent_lang"], self.cfg["my_lang"]
         turn = self.session.add("Other", text)
@@ -508,9 +571,9 @@ class MainWindow(QMainWindow):
         history = session.history_text()
         self._panel_processing("⏳ Translating…")
 
-        # Terjemahan dan saran jalan paralel: terjemahan (model cepat) tampil
-        # duluan, saran menyusul. Dulu keduanya digabung satu panggilan
-        # sehingga terjemahan ikut menunggu saran selesai (5-10 detik).
+        # Translation and suggestion run in parallel: the translation (fast
+        # model) appears first, the suggestion follows. They used to be one
+        # combined call, so translation waited for the suggestion (5-10s).
         def work_translate():
             try:
                 translated = brain.translate(text, opp, mine)
@@ -526,9 +589,9 @@ class MainWindow(QMainWindow):
         if mode == "conversation":
             def work_suggest():
                 try:
-                    saran = brain.suggest(session.context_desc, history, text, opp, mine, list(self._keywords))
-                    if gen == self._gen and saran.strip():
-                        self.bridge.suggestion.emit("Suggested reply: " + saran.replace("\n", "   ·   "))
+                    suggestion = brain.suggest(session.context_desc, history, text, opp, mine, list(self._keywords))
+                    if gen == self._gen and suggestion.strip():
+                        self.bridge.suggestion.emit("Suggested reply: " + suggestion.replace("\n", "   ·   "))
                 except Exception as exc:
                     if gen == self._gen:
                         self.bridge.status.emit("Suggestion problem: " + str(exc)[:160])
@@ -547,9 +610,9 @@ class MainWindow(QMainWindow):
 
             def work():
                 try:
-                    hasil = brain.translate(text, mine, opp)
+                    result = brain.translate(text, mine, opp)
                     if gen == self._gen:
-                        self.bridge.suggestion.emit(f"Your speech in {opp}: " + hasil)
+                        self.bridge.suggestion.emit(f"Your speech in {opp}: " + result)
                 except Exception as exc:
                     if gen == self._gen:
                         self.bridge.status.emit("AI problem: " + str(exc)[:160])
@@ -571,7 +634,7 @@ class MainWindow(QMainWindow):
 
     def stop_streams(self):
         self._active = False
-        self._gen += 1  # semua hasil thread sesi ini jadi basi
+        self._gen += 1  # every thread result from this session is now stale
         for s in self.stts:
             s.stop()
         for c in self.captures:
@@ -584,8 +647,8 @@ class MainWindow(QMainWindow):
         self.panel_badge.hide()
 
     def end_session(self):
-        # Kabari dulu, baru bekerja: menghentikan stream bisa makan detik dan
-        # tanpa ini aplikasi terlihat membeku tanpa penjelasan.
+        # Tell the user first, then work: stopping streams can take seconds
+        # and without this the app looks frozen with no explanation.
         self.set_busy(True, "Ending session - stopping audio, then building your summary…")
         self._set_session_state("ending")
         self._panel_processing("⏳ Ending session…")
@@ -604,7 +667,7 @@ class MainWindow(QMainWindow):
         def work():
             try:
                 summary = brain.summarize(session.context_desc, session.transcript_text(), mine)
-                if end_gen == self._gen:  # buang sebelum emit, bukan sesudah ditimpa
+                if end_gen == self._gen:  # drop before emitting, not after being overwritten
                     self.bridge.summary_ready.emit(summary)
             except Exception as exc:
                 if end_gen == self._gen:
@@ -614,7 +677,7 @@ class MainWindow(QMainWindow):
 
     def on_summary(self, summary):
         if getattr(self, "_end_gen", self._gen) != self._gen:
-            return  # ringkasan sesi lama, sesi baru sudah berjalan
+            return  # summary of an old session; a new one is already running
         self.set_busy(False)
         self._set_session_state("idle")
         if not summary.strip():
@@ -624,6 +687,8 @@ class MainWindow(QMainWindow):
                                 "kept in this session - use Export Transcript (.md).")
             return
         self._last_summary = summary
+        self.summary_btn.setEnabled(True)
+        self.summary_btn.setToolTip("Show the session summary again")
         # In-app summary card with rendered sections and copy/export actions.
         self.summary_text.setMarkdown(summary)
         self.summary_card.show()
@@ -640,7 +705,7 @@ class MainWindow(QMainWindow):
 
 def main():
     if sys.platform == "win32":
-        # Agar ikon taskbar memakai logo Lancarin, bukan ikon python.exe/exe generik.
+        # So the taskbar uses the Lancarin logo instead of the generic/python.exe icon.
         import ctypes
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Lancarin.App.1")
     app = QApplication(sys.argv)

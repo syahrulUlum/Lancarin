@@ -34,7 +34,7 @@ def run_event_loop(coro):
 
 
 class RealtimeSTT(threading.Thread):
-    """Satu sesi transkripsi. Callback: on_partial(str), on_final(str), on_error(str)."""
+    """One transcription session. Callbacks: on_partial(str), on_final(str), on_error(str)."""
 
     def __init__(self, token: str, frames, languages: list[str], keywords: list[str],
                  on_partial, on_final, on_error):
@@ -57,8 +57,8 @@ class RealtimeSTT(threading.Thread):
             loop.call_soon_threadsafe(lambda: asyncio.ensure_future(ws.close()))
 
     def run(self):
-        # Satu kali reconnect: putus sesaat (termasuk tutup bersih dari server)
-        # tidak boleh membunuh sesi diam-diam.
+        # Reconnect once: a brief drop (including a clean server close)
+        # must not silently kill the session.
         for attempt in range(2):
             if self._stopped.is_set():
                 return

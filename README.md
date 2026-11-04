@@ -1,19 +1,19 @@
 # Lancarin
 
-Asisten desktop real-time yang menangkap & menerjemahkan audio Zoom, Meet, dan
-YouTube, lalu memberi saran jawaban berbahasa Inggris yang nyambung dengan
-konteks percakapan. Untuk profesional Indonesia, didukung Muse Spark &
-Muse Voice Transcribe dari Meta Model API.
+A real-time desktop assistant that captures and translates audio from Zoom,
+Meet, and YouTube, then suggests English replies that fit the conversation.
+Built for Indonesian professionals, powered by Muse Spark and Muse Voice
+Transcribe from the Meta Model API.
 
-Rencana lengkap: [docs/rencana.md](docs/rencana.md)
+Full plan: [docs/rencana.md](docs/rencana.md)
 
-Struktur kode: `app.py` (jendela utama) memakai paket `lancarin/`
+Code layout: `app.py` (main window) uses the `lancarin/` package
 (`config`, `audio`, `stt`, `brain`, `session`, `theme`, `settings_dialog`).
-Aset logo di `assets/`, kemasan di `packaging/`, tes di `tests/`.
+Logo assets live in `assets/`, packaging in `packaging/`, tests in `tests/`.
 
-## Menjalankan (pengembangan)
+## Running (development)
 
-Prasyarat: Python 3.15, headset (mencegah echo).
+Requirements: Python 3.15 and a headset (prevents echo).
 
 ```powershell
 python -m venv .venv
@@ -21,44 +21,49 @@ python -m venv .venv
 .venv\Scripts\python app.py
 ```
 
-Antarmuka aplikasi berbahasa Inggris secara bawaan.
+The application UI is in English by default.
 
-1. Klik **Settings**, isi token Meta Model API (dari https://dev.meta.ai),
-   pilih model terjemahan dan model saran/ringkasan, jalankan
-   **Test Connection** — setiap model diuji terpisah — sampai semua ✓,
-   lalu **Save**. Start Session terkunci sampai tes lolos.
-2. Buka menu **Session** bila perlu: isi konteks (opsional), pilih
-   bahasa lawan/saya dan mode. Menu ini terlipat bawaan agar kotak
-   percakapan lega.
-3. **Start Session** — putar video/panggilan; panel di dalam aplikasi
-   menampilkan transkrip, terjemahan besar (tombol A−/A+), dan saran
-   jawaban. `F9` = Private Speech Check.
-4. **End & Summarize** — ringkasan tampil sebagai kartu di dalam
-   aplikasi (bisa disalin/diekspor), bukan popup. Ekspor `.md` berisi
-   ringkasan + transkrip lengkap.
+1. Click **Settings**, enter your Meta Model API token (from
+   https://dev.meta.ai), pick a translation model and a suggestions/summary
+   model, then run **Test Connection** - each model is tested separately -
+   until every line shows a checkmark, and **Save**. Start Session stays
+   locked until the test passes.
+2. Open the **Session** menu if needed: add context (optional), pick the
+   other party's language and yours, and choose a mode. The menu is
+   collapsed by default so the conversation panel stays spacious.
+3. **Start Session** - play a video or call; the in-app panel shows the
+   transcript, a large translation (A-/A+ buttons), and a suggested reply.
+   `F9` toggles Private Speech Check.
+4. **End and Summarize** - the summary appears as a card inside the app
+   (copyable, reopenable via **View Summary**, exportable), not a popup.
+   **New Session** clears the board for the next conversation.
 
-Catatan: mode privat tidak meneruskan audio ke aplikasi call; mute mic
-Zoom/Meet tetap dilakukan pengguna. Fallback STT lokal dan adapter
-macOS/Linux mengikuti [rencana](docs/rencana.md).
+Note: private mode never forwards your audio to the call app; muting your
+Zoom/Meet microphone is still up to you. Local STT fallback and macOS/Linux
+adapters are tracked in the GitHub backlog issues.
 
-## Hasil uji di mesin pengembangan (4 Nov 2026)
+## Measured results (development machine, Nov 2026)
 
-- Tes Koneksi lolos. Terjemahan memakai model terjemahan pilihan
-  (bawaan `muse-wonder-1.0`, terukur tampil ±2,5 detik) dan tampil
-  duluan; saran jawaban menyusul paralel dari model saran pilihan
-  (total ±8 detik). Streaming tidak membantu: token pertama model
-  reasoning baru keluar setelah 5–7 detik.
-- STT asli (ucapan TTS → loopback → WebSocket): transkrip parsial mengalir
-  tiap ±0,3 detik, final tepat saat ucapan selesai.
-- Aplikasi diam: ±123 MB RAM. Skenario interview 6 pertanyaan: saran
-  nyambung dengan konteks dan riwayat.
-- Belum teruji: installer di mesin bersih, sesi 60 menit, mode privat
-  dengan perangkat kedua.
+- Connection test passes. Translation uses the selected translation model
+  (default `muse-wonder-1.0`, measured at about 2.5s) and appears first;
+  the suggested reply follows in parallel from the suggestions model
+  (about 8s total). Streaming does not help: a reasoning model's first
+  token only arrives after 5-7s.
+- Interim translation now works in chunks: each new sentence fragment is
+  translated and appended while the other party keeps speaking, instead
+  of re-translating the whole partial transcript.
+- Real STT (TTS speech to loopback to WebSocket): partials stream every
+  ~0.3s and the final lands exactly when speech ends.
+- Idle app: about 123 MB RAM. Six-question interview scenario: suggestions
+  stay coherent with the context and history.
+- Not yet verified: the installer on a clean machine, a 60-minute
+  session, and private mode with a second device (tracked in issue #8).
 
-## Kemas installer (Windows)
+## Building the Windows installer
 
 ```powershell
 .venv\Scripts\python -m PyInstaller packaging\lancarin.spec
 ```
 
-Hasil di `dist\Lancarin\`. Bungkus Inno Setup memakai `packaging\installer.iss`.
+Output lands in `dist\Lancarin\`. Wrap it with Inno Setup using
+`packaging\installer.iss` (version 0.1.0).

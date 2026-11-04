@@ -73,4 +73,4 @@ def set_token(token: str) -> None:
 
 
 def token_hint(token: str) -> str:
-    return ("••••" + token[-4:]) if len(token) >= 4 else ("tersimpan" if token else "belum diisi")
+    return ("••••" + token[-4:]) if len(token) >= 4 else ("saved" if token else "not set")

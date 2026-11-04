@@ -1,6 +1,6 @@
 """Regresi: DNS asyncio di thread pekerja setelah PySide6 diimpor.
 
-Tanpa executor bersama di stt.py, ini gagal dengan
+Without the shared executor in stt.py this fails with
 TypeError: 'lazy_import' object is not callable (Python 3.15 + PySide6).
 
 Jalankan: .venv\\Scripts\\python -m unittest tests.test_stt_thread -v
@@ -25,7 +25,7 @@ class TestSttThread(unittest.TestCase):
         def work():
             try:
                 result["infos"] = stt.run_event_loop(_dns_probe())
-            except Exception as exc:  # simpan untuk assertion di bawah
+            except Exception as exc:  # saved for the assertion below
                 result["error"] = exc
 
         t = threading.Thread(target=work)

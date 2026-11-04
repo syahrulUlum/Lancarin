@@ -1,4 +1,4 @@
-"""Regresi latensi: terjemahan interim muncul dari transkrip parsial,
+"""Latency regression: interim translation appears from the partial transcript,
 tanpa menunggu giliran bicara selesai (final).
 
 Jalankan: .venv\\Scripts\\python -m unittest tests.test_interim -v
@@ -28,11 +28,11 @@ class TestInterim(unittest.TestCase):
     def setUpClass(cls):
         cls.qapp = QApplication.instance() or QApplication([])
 
-    def test_interim_updates_overlay_without_final(self):
+    def test_interim_updates_panel_without_final(self):
         win = appmod.MainWindow()
         win.brain = FakeBrain()
         win._active = True
-        win.on_partial("Other", "Hello how are you today")
+        win.on_partial("Other", "Hello how are you today my good friend")
         win._interim_at = 0.0
         win.maybe_interim()
         for _ in range(50):
@@ -40,7 +40,7 @@ class TestInterim(unittest.TestCase):
             if win.panel_translated.text():
                 break
             time.sleep(0.1)
-        self.assertTrue(win.brain.calls, "translate interim tidak dipanggil")
+        self.assertTrue(win.brain.calls, "interim translate was never called")
         self.assertIn("TERJEMAHAN:", win.panel_translated.text())
         win.stop_streams()
 

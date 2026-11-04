@@ -1,4 +1,4 @@
-"""Otak AI Lancarin: terjemahan, saran jawaban, ringkasan (Muse Spark)."""
+"""Lancarin AI brain: translation, reply suggestions, summaries (Meta models)."""
 import time
 
 from openai import OpenAI
@@ -7,7 +7,7 @@ from . import config
 
 CHUNK_CHARS = 8000
 # Terjemahan harus secepat mungkin: terukur di mesin ini wonder menjawab
-# 2-5 detik vs Spark 4-10 detik. Saran/ringkasan tetap model pilihan user.
+# measured 2-5s vs Spark 4-10s. Suggestions/summaries keep the user's model.
 FAST_MODEL = "muse-wonder-1.0"
 
 
@@ -15,11 +15,11 @@ def _parse(raw: str, *labels: str) -> dict[str, str]:
     out: dict[str, str] = {}
     current = None
     for line in raw.splitlines():
-        bersih = line.strip().strip("*").strip()
-        hit = next((lb for lb in labels if bersih.upper().startswith(lb + ":")), None)
+        cleaned = line.strip().strip("*").strip()
+        hit = next((lb for lb in labels if cleaned.upper().startswith(lb + ":")), None)
         if hit:
             current = hit
-            out[hit] = bersih[len(hit) + 1:].strip().strip("*").strip()
+            out[hit] = cleaned[len(hit) + 1:].strip().strip("*").strip()
         elif current and line.strip():
             out[current] += "\n" + line.strip()
     return out
@@ -38,7 +38,7 @@ class Brain:
 
     def chat(self, system: str, user: str, timeout: float = 60.0, model: str = None) -> str:
         # Tanpa max_tokens: pada Muse Spark batas kecil dimakan proses
-        # penalaran model dan content akhir kembali kosong.
+        # the model's reasoning and the final content comes back empty.
         r = self.client.chat.completions.create(
             model=model or self.model,
             messages=[{"role": "system", "content": system},
@@ -83,8 +83,8 @@ class Brain:
         )
         if len(transcript) <= CHUNK_CHARS:
             return self.chat(system, f"Context: {context_desc or '-'}\n\nTranscript:\n{transcript}")
-        # Transkrip panjang: ringkas per potongan lalu gabungkan, agar tidak
-        # melampaui konteks model dan gagal total.
+        # Long transcript: summarize chunk by chunk, then combine, so it never
+        # exceeds the model context and fails outright.
         chunks, buf = [], ""
         lines = [p for line in transcript.splitlines()
                  for p in (line[i:i + CHUNK_CHARS] for i in range(0, max(1, len(line)), CHUNK_CHARS))]

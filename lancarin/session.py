@@ -1,4 +1,4 @@
-"""Catatan sesi: giliran bicara berlabel + ekspor Markdown."""
+"""Session log: labeled speaker turns + Markdown export."""
 import time
 from dataclasses import dataclass, field
 

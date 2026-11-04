@@ -1,4 +1,4 @@
-"""Regresi terjemahan kosong: Brain.chat tidak boleh mengirim max_tokens
+"""Empty-translation regression: Brain.chat must not send max_tokens
 (batas kecil dimakan penalaran Muse Spark dan content kembali kosong).
 
 Jalankan: .venv\\Scripts\\python -m unittest tests.test_brain -v
@@ -43,7 +43,7 @@ class FakeOpenAI:
 
 
 class TestBrain(unittest.TestCase):
-    def test_chat_tidak_mengirim_max_tokens(self):
+    def test_chat_does_not_send_max_tokens(self):
         original = brain_mod.OpenAI
         brain_mod.OpenAI = FakeOpenAI
         try:
