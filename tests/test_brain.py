@@ -5,7 +5,7 @@ Jalankan: .venv\\Scripts\\python -m unittest tests.test_brain -v
 """
 import unittest
 
-import brain as brain_mod
+from lancarin import brain as brain_mod
 
 
 class _Msg:

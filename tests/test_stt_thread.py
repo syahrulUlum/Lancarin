@@ -10,7 +10,7 @@ import threading
 import unittest
 
 import PySide6.QtWidgets  # noqa: F401  (urutan exe beku: Qt selalu lebih dulu)
-import stt
+from lancarin import stt
 
 
 async def _dns_probe():

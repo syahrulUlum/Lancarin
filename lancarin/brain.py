@@ -3,7 +3,7 @@ import time
 
 from openai import OpenAI
 
-import config
+from . import config
 
 CHUNK_CHARS = 8000
 # Terjemahan harus secepat mungkin: terukur di mesin ini wonder menjawab

@@ -5,7 +5,7 @@ Jalankan: .venv\\Scripts\\python -m unittest tests.test_audio -v
 import time
 import unittest
 
-import audio
+from lancarin import audio
 
 
 class TestAudioSingleton(unittest.TestCase):

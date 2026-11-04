@@ -7,6 +7,10 @@ Muse Voice Transcribe dari Meta Model API.
 
 Rencana lengkap: [docs/rencana.md](docs/rencana.md)
 
+Struktur kode: `app.py` (jendela utama) memakai paket `lancarin/`
+(`config`, `audio`, `stt`, `brain`, `session`, `theme`, `settings_dialog`).
+Aset logo di `assets/`, kemasan di `packaging/`, tes di `tests/`.
+
 ## Menjalankan (pengembangan)
 
 Prasyarat: Python 3.15, headset (mencegah echo).

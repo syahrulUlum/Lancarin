@@ -5,61 +5,21 @@ import threading
 import time
 from pathlib import Path
 
-# stt kebal urutan impor (lihat stt.py); impor awal di sini hanya kejelasan.
-import audio
-import brain as brain_mod
-import config
-from session import Session
-from stt import RealtimeSTT
+# stt kebal urutan impor (lihat lancarin/stt.py); impor awal di sini hanya kejelasan.
+from lancarin import audio, config
+from lancarin import brain as brain_mod
+from lancarin.session import Session
+from lancarin.settings_dialog import SettingsDialog
+from lancarin.stt import RealtimeSTT
+from lancarin.theme import QSS, _card, is_tested, test_fingerprint
 
 from PySide6.QtCore import Qt, QTimer, Signal, QObject
 from PySide6.QtGui import QIcon, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout,
+    QApplication, QBoxLayout, QComboBox, QFileDialog, QHBoxLayout,
     QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit,
     QProgressBar, QPushButton, QRadioButton, QScrollArea, QTextEdit, QVBoxLayout, QWidget,
 )
-
-QSS = """
-QMainWindow, QDialog { background: #0f141b; }
-QLabel { color: #dbe4ee; font-size: 12px; }
-QLabel#stepTitle { color: #ffffff; font-size: 14px; font-weight: 600; }
-QLabel#hint { color: #8494a7; font-size: 11px; }
-QFrame#card { background: #171f2a; border: 1px solid #263242; border-radius: 10px; }
-QLineEdit, QPlainTextEdit, QComboBox, QTextEdit {
-    background: #101820; color: #e8eef4; border: 1px solid #2b3a4d;
-    border-radius: 7px; padding: 5px 8px; font-size: 12px;
-}
-QComboBox::drop-down { border: none; width: 20px; }
-QRadioButton { color: #dbe4ee; font-size: 12px; spacing: 5px; }
-QPushButton {
-    background: #223146; color: #e8eef4; border: 1px solid #31445e;
-    border-radius: 7px; padding: 5px 10px; font-size: 12px;
-}
-QPushButton:hover { background: #2a3d59; }
-QPushButton#primary {
-    background: #0d9488; border-color: #0d9488; color: #ffffff;
-    font-size: 14px; font-weight: 700; padding: 9px;
-}
-QPushButton#primary:hover { background: #0fae9f; }
-QPushButton#danger {
-    background: #b91c1c; border-color: #b91c1c; color: #ffffff;
-    font-size: 13px; font-weight: 700; padding: 8px;
-}
-QPushButton:disabled { background: #1a2432; color: #5c6d80; border-color: #223146; }
-QPushButton#privateBtn:checked { background: #92400e; border-color: #d97706; color: #fff7ed; }
-QProgressBar { background: #101820; border: 1px solid #2b3a4d; border-radius: 5px; height: 10px; text-align: center; color: transparent; }
-QProgressBar::chunk { background: #0d9488; border-radius: 4px; }
-"""
-
-
-def test_fingerprint(cfg: dict) -> str:
-    return f"{cfg.get('model', '')}|{cfg.get('translate_model', '')}|{cfg.get('base_url', '')}"
-
-
-def is_tested(cfg: dict) -> bool:
-    return bool(cfg.get("tested_ok_for")) and cfg["tested_ok_for"] == test_fingerprint(cfg)
-
 
 class Bridge(QObject):
     opponent_final = Signal(str)
@@ -73,142 +33,15 @@ class Bridge(QObject):
     test_done = Signal(str)
 
 
-class SettingsDialog(QDialog):
-    result_ready = Signal(str)
-
-    def __init__(self, cfg, parent=None):
-        super().__init__(parent)
-        self.cfg = dict(cfg)
-        self.test_ok = False
-        self._tested_for = ""
-        self._test_ran = False
-        self.setWindowTitle("Lancarin Settings")
-        self.setStyleSheet(QSS)
-        self.resize(480, 420)
-        self.token_edit = QLineEdit()
-        self.token_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        token = config.get_token()
-        self.token_edit.setPlaceholderText(config.token_hint(token) + " - paste a new token to replace it")
-        self.model_box = QComboBox()
-        self.model_box.addItems(config.MODELS)
-        self.model_box.setCurrentText(cfg["model"])
-        self.translate_model_box = QComboBox()
-        self.translate_model_box.addItems(config.MODELS)
-        self.translate_model_box.setCurrentText(cfg.get("translate_model") or config.DEFAULTS["translate_model"])
-        self.base_edit = QLineEdit(cfg["base_url"])
-        self.advanced_check = QCheckBox("Advanced")
-        self.advanced_check.toggled.connect(lambda on: self.advanced_box.setVisible(on))
-        self.advanced_box = QWidget()
-        adv_lay = QVBoxLayout(self.advanced_box)
-        adv_lay.setContentsMargins(0, 0, 0, 0)
-        adv_lay.addWidget(QLabel("Base URL (leave as the Meta default unless you use a proxy):"))
-        adv_lay.addWidget(self.base_edit)
-        self.advanced_box.hide()
-        self.result = QTextEdit(readOnly=True)
-        self.result.setPlaceholderText("Connection test results appear here. Each selected model is tested separately.")
-        self.result.setMaximumHeight(120)
-        self.result_ready.connect(self.result.setPlainText)
-        test_btn = QPushButton("Test Connection")
-        test_btn.clicked.connect(self.run_test)
-        save_btn = QPushButton("Save")
-        save_btn.setObjectName("primary")
-        save_btn.clicked.connect(self.save)
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(self.reject)
-        self._save_btn = save_btn
-        self.result_ready.connect(lambda _t: self._save_btn.setEnabled(True))
-        lay = QVBoxLayout(self)
-        lay.setSpacing(8)
-        title = QLabel("Settings"); title.setObjectName("stepTitle")
-        lay.addWidget(title)
-        lay.addWidget(QLabel("Meta Model API token (stored securely in your OS keychain; get one at dev.meta.ai):"))
-        lay.addWidget(self.token_edit)
-        models = QHBoxLayout()
-        left = QVBoxLayout(); left.addWidget(QLabel("Translation model:")); left.addWidget(self.translate_model_box)
-        right = QVBoxLayout(); right.addWidget(QLabel("Suggestions and summary:")); right.addWidget(self.model_box)
-        models.addLayout(left, 1); models.addLayout(right, 1)
-        lay.addLayout(models)
-        hint = QLabel("Translation runs live, so a fast model matters most there (muse-wonder-1.0 measured fastest). Suggestions and summaries benefit from a stronger reasoning model.")
-        hint.setObjectName("hint"); hint.setWordWrap(True)
-        lay.addWidget(hint)
-        lay.addWidget(self.advanced_check)
-        lay.addWidget(self.advanced_box)
-        lay.addWidget(test_btn)
-        lay.addWidget(self.result)
-        btn_row = QHBoxLayout()
-        btn_row.addStretch(1); btn_row.addWidget(cancel_btn); btn_row.addWidget(save_btn)
-        lay.addLayout(btn_row)
-
-    def current_cfg(self):
-        cfg = dict(self.cfg)
-        cfg["model"] = self.model_box.currentText()
-        cfg["translate_model"] = self.translate_model_box.currentText()
-        cfg["base_url"] = self.base_edit.text().strip() or config.DEFAULTS["base_url"]
-        return cfg
-
-    def run_test(self):
-        self._save_btn.setEnabled(False)  # do not save while the test is running
-        self.result.setPlainText("Testing each model and your audio devices…")
-        token = self.token_edit.text().strip() or config.get_token()
-        cfg = self.current_cfg()
-
-        def work():
-            lines = []
-            brain_steps = brain_mod.test_connection(cfg, token)
-            self._test_ran = True
-            self.test_ok = bool(brain_steps) and all(ok for _, ok, _ in brain_steps)
-            self._tested_for = test_fingerprint(cfg) if self.test_ok else ""
-            for name, ok, msg in brain_steps:
-                lines.append(("✓ " if ok else "✗ ") + name + ": " + msg)
-            try:
-                loop_i, mic_i, _ = audio.list_devices()
-                ok = loop_i is not None and mic_i is not None
-                lines.append(("✓ " if ok else "✗ ") + f"Audio devices: system audio (other party)={loop_i}, microphone (you)={mic_i}")
-            except Exception as exc:
-                lines.append("✗ Audio devices: " + str(exc)[:120])
-            self.result_ready.emit("\n".join(lines))
-
-        threading.Thread(target=work, daemon=True).start()
-
-    def save(self):
-        token = self.token_edit.text().strip()
-        if token:
-            config.set_token(token)
-        cfg = self.current_cfg()
-        if self.test_ok and self._tested_for == test_fingerprint(cfg):
-            cfg["tested_ok_for"] = self._tested_for
-        elif self._test_ran:
-            cfg.pop("tested_ok_for", None)  # tes ulang gagal: gerbang lama hangus
-        config.save(cfg)
-        self.accept()
-
-
-def _card(title: str, hint: str) -> tuple[QFrame, QVBoxLayout]:
-    frame = QFrame()
-    frame.setObjectName("card")
-    lay = QVBoxLayout(frame)
-    lay.setContentsMargins(10, 9, 10, 9)
-    lay.setSpacing(6)
-    t = QLabel(title)
-    t.setObjectName("stepTitle")
-    lay.addWidget(t)
-    if hint:
-        h = QLabel(hint)
-        h.setObjectName("hint")
-        h.setWordWrap(True)
-        lay.addWidget(h)
-    return frame, lay
-
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Lancarin - Conversation Assistant")
         self.setStyleSheet(QSS)
         _base = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
-        logo = _base / "assets" / "lancarin.png"
+        logo = _base / "assets" / "lancarin.ico"
         if not logo.exists():
-            logo = Path(__file__).parent / "assets" / "lancarin.png"
+            logo = Path(__file__).parent / "assets" / "lancarin.ico"
         if logo.exists():
             self.setWindowIcon(QIcon(str(logo)))
         self.bridge = Bridge()
@@ -238,6 +71,7 @@ class MainWindow(QMainWindow):
             "border-radius:12px;padding:5px 12px;font-size:12px;")
         settings_btn = QPushButton("Settings")
         settings_btn.clicked.connect(self.open_settings)
+        self.settings_btn = settings_btn
         self.session_btn = QPushButton("Session ▾")
         self.session_btn.setCheckable(True)
         self.session_btn.clicked.connect(self.toggle_settings_panel)
@@ -274,6 +108,7 @@ class MainWindow(QMainWindow):
         lang_row.addWidget(QLabel("Me:"))
         lang_row.addWidget(self.my_lang, 1)
         lay1.addLayout(lang_row)
+        self.lang_layout = lang_row
         lay1.addWidget(self.context_edit)
         lay1.addWidget(self.keywords_edit)
         mode_row = QHBoxLayout()
@@ -300,14 +135,16 @@ class MainWindow(QMainWindow):
         self.session_state.setStyleSheet(
             "color:#cbd5e1;background:#1c2939;border:1px solid #2b3f58;"
             "border-radius:9px;padding:4px 10px;font-size:12px;font-weight:600;")
-        self.update_mode_label()
+        self._set_session_state("idle")
         action_row = QHBoxLayout()
         action_row.addWidget(self.start_btn, 2)
         action_row.addWidget(self.stop_btn, 2)
+        self.action_layout = action_row
         util_row = QHBoxLayout()
         util_row.addWidget(self.private_btn)
         util_row.addWidget(export_btn)
         util_row.addStretch(1)
+        self.util_layout = util_row
 
         self.level_loop = QProgressBar(maximum=100)
         self.level_mic = QProgressBar(maximum=100)
@@ -351,9 +188,15 @@ class MainWindow(QMainWindow):
         panel_head.addWidget(self.btn_font_smaller)
         panel_head.addWidget(self.btn_font_bigger)
         lay3.addLayout(panel_head)
-        lay3.addWidget(self.panel_suggested)
-        lay3.addWidget(self.panel_original)
-        lay3.addWidget(self.panel_translated)
+        for caption, lab in (("Original", self.panel_original),
+                             ("Translation", self.panel_translated),
+                             ("Suggested reply", self.panel_suggested)):
+            cap = QLabel(caption)
+            cap.setObjectName("hint")
+            lay3.addWidget(cap)
+            lay3.addWidget(lab)
+        self.live_title = card3.title_label
+        self.live_layout = lay3
         self.busy_bar = QProgressBar(minimum=0, maximum=0)  # spins while the AI works
         self.busy_bar.hide()
         lay3.addWidget(self.busy_bar)
@@ -400,8 +243,8 @@ class MainWindow(QMainWindow):
         central = QWidget(); central.setLayout(root)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(central)
         self.setCentralWidget(scroll)
-        self.resize(800, 600)
-        self.setMinimumSize(620, 460)
+        self.resize(760, 580)
+        self.setMinimumSize(440, 460)
         self._wire()
 
     # ---------- kabel sinyal & status ----------
@@ -426,8 +269,11 @@ class MainWindow(QMainWindow):
         self._interim_timer.start(300)
 
     def update_mode_label(self):
+        conversation = self.mode_conversation.isChecked()
+        if hasattr(self, "live_title"):
+            self.live_title.setText("Live Conversation" if conversation else "Live Translation")
         mode = ("Conversation (translation + reply suggestions)"
-                if self.mode_conversation.isChecked() else "Translation only")
+                if conversation else "Translation only")
         prefix = {"idle": "○ Not started", "live": "● LIVE",
                   "ending": "⏳ Ending - building summary"}.get(self._sess_state, "○ Not started")
         color = "#5eead4" if self._sess_state == "live" else "#cbd5e1"
@@ -438,19 +284,35 @@ class MainWindow(QMainWindow):
 
     def _set_session_state(self, state: str):
         self._sess_state = state
+        locked = state != "idle"
+        for w in (self.opp_lang, self.my_lang, self.context_edit, self.keywords_edit,
+                  self.mode_conversation, self.mode_translate, self.settings_btn):
+            w.setEnabled(not locked)  # changing setup mid-session has no effect; say so
         if state == "live":
             self.start_btn.setEnabled(False)
             self.start_btn.setText("● Session Running")
+            self.start_btn.setToolTip("A session is already running")
             self.stop_btn.setEnabled(True)
+            self.stop_btn.setToolTip("End the current session and build its summary")
         elif state == "ending":
             self.start_btn.setEnabled(False)
             self.start_btn.setText("⏳ Ending…")
             self.stop_btn.setEnabled(False)
+            self.stop_btn.setToolTip("Finishing the summary…")
         else:
             self.start_btn.setEnabled(True)
             self.start_btn.setText("▶ Start Session")
+            self.start_btn.setToolTip("")
             self.stop_btn.setEnabled(False)
+            self.stop_btn.setToolTip("Start a session first - End is available while a session is running")
         self.update_mode_label()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        compact = self.width() < 680
+        arah = QBoxLayout.Direction.TopToBottom if compact else QBoxLayout.Direction.LeftToRight
+        self.action_layout.setDirection(arah)
+        self.util_layout.setDirection(arah)
 
     def toggle_settings_panel(self):
         show = self.session_btn.isChecked()
@@ -777,6 +639,10 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    if sys.platform == "win32":
+        # Agar ikon taskbar memakai logo Lancarin, bukan ikon python.exe/exe generik.
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Lancarin.App.1")
     app = QApplication(sys.argv)
     win = MainWindow()
     win.show()

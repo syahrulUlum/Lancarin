@@ -16,7 +16,7 @@ _futures_pkg.ThreadPoolExecutor = ThreadPoolExecutor
 
 import websockets
 
-import config
+from . import config
 
 URL = "wss://api.meta.ai/v1/asr/realtime"
 

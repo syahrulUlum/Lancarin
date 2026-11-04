@@ -8,9 +8,9 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import audio
-import brain as brain_mod
-import stt
+from lancarin import audio
+from lancarin import brain as brain_mod
+from lancarin import stt
 
 
 class _FakeCompletions:
@@ -513,6 +513,55 @@ class TestCompactAndState(unittest.TestCase):
         win._set_session_state("idle")
         self.assertTrue(win.start_btn.isEnabled())
         self.assertEqual(win.start_btn.text(), "▶ Start Session")
+
+
+class TestStatePolish(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QApplication.instance() or QApplication([])
+
+    def test_tombol_nonaktif_punya_penjelasan(self):
+        win = appmod.MainWindow()
+        self.assertIn("Start a session first", win.stop_btn.toolTip())
+        win._set_session_state("live")
+        self.assertIn("End the current session", win.stop_btn.toolTip())
+        self.assertIn("already running", win.start_btn.toolTip())
+
+    def test_judul_kartu_mengikuti_mode(self):
+        win = appmod.MainWindow()
+        win.mode_translate.setChecked(True)
+        win.update_mode_label()
+        self.assertEqual(win.live_title.text(), "Live Translation")
+        win.mode_conversation.setChecked(True)
+        win.update_mode_label()
+        self.assertEqual(win.live_title.text(), "Live Conversation")
+
+    def test_urutan_panel_asli_terjemahan_saran(self):
+        win = appmod.MainWindow()
+        lay = win.live_layout
+        self.assertLess(lay.indexOf(win.panel_original), lay.indexOf(win.panel_translated))
+        self.assertLess(lay.indexOf(win.panel_translated), lay.indexOf(win.panel_suggested))
+
+    def test_jendela_bisa_jauh_lebih_sempit_dan_layout_menyesuaikan(self):
+        win = appmod.MainWindow()
+        self.assertLessEqual(win.minimumWidth(), 480)
+        win.resize(500, 600)
+        win.show()
+        self.qapp.processEvents()
+        from PySide6.QtWidgets import QBoxLayout
+        self.assertEqual(win.action_layout.direction(), QBoxLayout.Direction.TopToBottom,
+                         "di lebar sempit tombol utama harus menumpuk vertikal")
+        win.resize(900, 600)
+        self.qapp.processEvents()
+        self.assertEqual(win.action_layout.direction(), QBoxLayout.Direction.LeftToRight)
+
+    def test_pengaturan_terkunci_saat_sesi_live(self):
+        win = appmod.MainWindow()
+        win._set_session_state("live")
+        self.assertFalse(win.opp_lang.isEnabled())
+        self.assertFalse(win.settings_btn.isEnabled())
+        win._set_session_state("idle")
+        self.assertTrue(win.opp_lang.isEnabled())
 
 
 if __name__ == "__main__":
