@@ -37,11 +37,11 @@ class TestInterim(unittest.TestCase):
         win.maybe_interim()
         for _ in range(50):
             self.qapp.processEvents()
-            if win.overlay.translated.text():
+            if win.panel_translated.text():
                 break
             time.sleep(0.1)
         self.assertTrue(win.brain.calls, "translate interim tidak dipanggil")
-        self.assertIn("TERJEMAHAN:", win.overlay.translated.text())
+        self.assertIn("TERJEMAHAN:", win.panel_translated.text())
         win.stop_streams()
 
 

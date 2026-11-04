@@ -101,7 +101,8 @@ class TestTimeoutPerPanggilan(unittest.TestCase):
         orig = brain_mod.OpenAI
         brain_mod.OpenAI = RecOpenAI
         try:
-            b = brain_mod.Brain({"model": "muse-spark-1.3", "base_url": "https://x"}, "tok")
+            b = brain_mod.Brain({"model": "muse-spark-1.3", "translate_model": "muse-spark-1.2",
+                                 "base_url": "https://x"}, "tok")
             b.translate("halo", "Indonesian", "English")
             kw = RecOpenAI.last.chat.completions.kwargs
             b.chat("sys", "usr")  # jalur saran/ringkasan tetap model pilihan
@@ -109,8 +110,8 @@ class TestTimeoutPerPanggilan(unittest.TestCase):
         finally:
             brain_mod.OpenAI = orig
         self.assertEqual(kw.get("timeout"), 15.0)
-        self.assertEqual(kw.get("model"), "muse-wonder-1.0",
-                         "terjemahan harus memakai model tercepat terukur, bukan model reasoning pilihan")
+        self.assertEqual(kw.get("model"), "muse-spark-1.2",
+                         "terjemahan harus memakai model terjemahan pilihan pengguna di Pengaturan")
         self.assertEqual(kw_chat.get("model"), "muse-spark-1.3")
 
 
@@ -235,20 +236,20 @@ class TestAppFixes(unittest.TestCase):
         win._active = True
         win.on_partial("Lawan", "teks terbaru yang sedang diucapkan")
         win.on_interim("teks lama", "TERJEMAHAN LAMA")
-        self.assertNotEqual(win.overlay.translated.text(), "TERJEMAHAN LAMA")
+        self.assertNotEqual(win.panel_translated.text(), "TERJEMAHAN LAMA")
 
     def test_log_lolos_dari_html(self):
         win = self._win()
         win.on_translation("halo <b>semua</b>", "<i>terjemahan</i> & salam")
         self.assertIn("<i>terjemahan</i> & salam", win.log.toPlainText())
 
-    def test_stop_menyembunyikan_overlay(self):
+    def test_stop_membersihkan_panel(self):
         win = self._win()
-        win.overlay.show()
-        self.qapp.processEvents()
+        win._active = True
+        win.on_partial("Lawan", "halo")
         win.stop_streams()
         self.qapp.processEvents()
-        self.assertFalse(win.overlay.isVisible())
+        self.assertTrue(win.panel_badge.isHidden())
 
     def test_terjemahan_tampil_sebelum_saran_selesai(self):
         win = self._win()
@@ -256,38 +257,30 @@ class TestAppFixes(unittest.TestCase):
         win.cfg["mode"] = "conversation"
         win._active = True
         win.on_opponent("Hello there")
-        ok = self._pump_until(lambda: win.overlay.translated.text() == "Halo terjemahan", timeout=0.5)
+        ok = self._pump_until(lambda: win.panel_translated.text() == "Halo terjemahan", timeout=0.5)
         self.assertTrue(ok, "terjemahan tidak tampil duluan (masih menunggu saran)")
-        self.assertTrue(self._pump_until(lambda: "Jawaban saran" in win.overlay.suggested.text()))
+        self.assertTrue(self._pump_until(lambda: "Jawaban saran" in win.panel_suggested.text()))
         self.assertEqual(len(win.brain.calls), 1)
         self.assertEqual(len(win.brain.suggest_calls), 1)
         win.stop_streams()
 
-    def test_tombol_overlay_hide_dan_ukuran(self):
-        ov = appmod.Overlay()
-        ov.show()
-        self.qapp.processEvents()
-        self.assertTrue(ov.isVisible())
-        ov.btn_hide.click()
-        self.qapp.processEvents()
-        self.assertFalse(ov.isVisible(), "tombol sembunyikan overlay tidak bekerja")
-        ov.show()
-        lebar, font = ov._width, ov._font
-        ov.btn_bigger.click()
-        self.assertGreater(ov._width, lebar)
-        self.assertGreater(ov._font, font)
-        ov.btn_smaller.click()
-        self.assertEqual(ov._font, font)
-
-    def test_tombol_tampilkan_overlay_di_jendela_utama(self):
+    def test_tidak_ada_overlay_dan_font_panel_bisa_diubah(self):
         win = self._win()
-        win.overlay.show()
-        win.overlay_btn.click()
+        self.assertFalse(hasattr(win, "overlay"), "overlay harus sudah dihapus")
+        font = win._panel_font
+        win.btn_font_bigger.click()
+        self.assertGreater(win._panel_font, font)
+        win.btn_font_smaller.click()
+        self.assertEqual(win._panel_font, font)
+
+    def test_menu_pengaturan_sesi_bisa_diciutkan(self):
+        win = self._win()
+        self.assertTrue(win.settings_panel.isHidden(), "pengaturan sesi harus terlipat secara bawaan")
+        win.session_btn.click()
         self.qapp.processEvents()
-        self.assertFalse(win.overlay.isVisible())
-        win.overlay_btn.click()
-        self.qapp.processEvents()
-        self.assertTrue(win.overlay.isVisible())
+        self.assertFalse(win.settings_panel.isHidden())
+        win.session_btn.click()
+        self.assertTrue(win.settings_panel.isHidden())
 
     def test_akhiri_sesi_ada_indikator_proses(self):
         class SlowBrain:
@@ -329,17 +322,15 @@ class TestAppFixes(unittest.TestCase):
         self.assertEqual(len(win.brain.calls), 2,
                          "interim kedua harus jalan paralel (latest-wins), bukan menunggu yang pertama")
         self.assertTrue(self._pump_until(
-            lambda: win.overlay.translated.text() == "T:hello how are you doing today my friend"))
+            lambda: win.panel_translated.text() == "T:hello how are you doing today my friend"))
         win.stop_streams()
 
-    def test_overlay_tumbuh_untuk_teks_panjang(self):
-        ov = appmod.Overlay()
-        awal = ov.height()
-        ov.show_translated("kata bermakna " * 40)
+    def test_panel_terjemahan_teks_panjang_terlihat(self):
+        win = self._win()
+        win.panel_translated.setText("kata bermakna " * 40)
+        win.panel_translated.show()
         self.qapp.processEvents()
-        self.assertGreater(ov.height(), awal)
-        butuh = ov.translated.heightForWidth(ov.width())
-        self.assertGreaterEqual(ov.height(), butuh, "teks panjang masih terpotong di bawah")
+        self.assertIn("kata bermakna", win.panel_translated.text())
 
     def test_interim_awalan_masih_ditampilkan(self):
         win = self._win()
@@ -347,7 +338,7 @@ class TestAppFixes(unittest.TestCase):
         win.on_partial("Lawan", "hello how are you doing today")
         win._interim_snapshot = "hello how are"
         win.on_interim("hello how are", "HALO APA KABAR")
-        self.assertEqual(win.overlay.translated.text(), "HALO APA KABAR")
+        self.assertEqual(win.panel_translated.text(), "HALO APA KABAR")
 
     def test_final_terlambat_setelah_stop_dibuang(self):
         win = self._win()
@@ -386,11 +377,14 @@ class TestAppFixes(unittest.TestCase):
         _app.config.save = lambda cfg: saved.update(cfg)
         _app.brain_mod.test_connection = lambda cfg, tok: [("Model", True, "ok")]
         try:
-            dlg = _app.SettingsDialog({"model": "muse-spark-1.3", "base_url": "https://x"}, None)
+            dlg = _app.SettingsDialog({"model": "muse-spark-1.3", "translate_model": "muse-wonder-1.0",
+                                       "base_url": "https://x"}, None)
             dlg.run_test()
             self.assertTrue(self._pump_until(lambda: "✓" in dlg.result.toPlainText()))
             dlg.save()
-            self.assertEqual(saved.get("tested_ok_for"), _app.test_fingerprint({"model": "muse-spark-1.3", "base_url": "https://x"}))
+            self.assertEqual(saved.get("translate_model"), "muse-wonder-1.0")
+            self.assertEqual(saved.get("tested_ok_for"), _app.test_fingerprint(
+                {"model": "muse-spark-1.3", "translate_model": "muse-wonder-1.0", "base_url": "https://x"}))
         finally:
             _app.config.save, _app.brain_mod.test_connection = orig_save, orig_test
         # Start terkunci tanpa gerbang

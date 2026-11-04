@@ -34,6 +34,7 @@ class Brain:
         self.client = OpenAI(api_key=token, base_url=cfg["base_url"],
                              timeout=60.0, max_retries=1)
         self.model = cfg["model"]
+        self.translate_model = cfg.get("translate_model") or FAST_MODEL
 
     def chat(self, system: str, user: str, timeout: float = 60.0, model: str = None) -> str:
         # Tanpa max_tokens: pada Muse Spark batas kecil dimakan proses
@@ -53,7 +54,7 @@ class Brain:
             f"You are a precise live interpreter. Translate from {src} to {dst}. "
             "The text may be an unfinished sentence fragment; translate what is there. "
             "Output ONLY the translation, no quotes, no notes.",
-            text, timeout=15.0, model=FAST_MODEL,
+            text, timeout=15.0, model=self.translate_model,
         )
 
     def suggest(self, context_desc: str, history: str, opponent_text: str,

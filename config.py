@@ -26,6 +26,7 @@ LANGUAGES = [
 
 DEFAULTS = {
     "model": "muse-wonder-1.0",
+    "translate_model": "muse-wonder-1.0",
     "base_url": "https://api.meta.ai/v1",
     "opponent_lang": "English",
     "my_lang": "Indonesian",

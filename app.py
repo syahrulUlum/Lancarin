@@ -53,7 +53,7 @@ QProgressBar::chunk { background: #0d9488; border-radius: 4px; }
 
 
 def test_fingerprint(cfg: dict) -> str:
-    return f"{cfg.get('model', '')}|{cfg.get('base_url', '')}"
+    return f"{cfg.get('model', '')}|{cfg.get('translate_model', '')}|{cfg.get('base_url', '')}"
 
 
 def is_tested(cfg: dict) -> bool:
@@ -91,6 +91,9 @@ class SettingsDialog(QDialog):
         self.model_box = QComboBox()
         self.model_box.addItems(config.MODELS)
         self.model_box.setCurrentText(cfg["model"])
+        self.translate_model_box = QComboBox()
+        self.translate_model_box.addItems(config.MODELS)
+        self.translate_model_box.setCurrentText(cfg.get("translate_model") or config.DEFAULTS["translate_model"])
         self.base_edit = QLineEdit(cfg["base_url"])
         self.result = QTextEdit(readOnly=True)
         self.result.setPlaceholderText("Hasil Tes Koneksi muncul di sini.")
@@ -107,11 +110,10 @@ class SettingsDialog(QDialog):
         lay.addWidget(title)
         lay.addWidget(QLabel("Token Meta Model API (tersimpan aman di brankas OS, dapatkan di dev.meta.ai):"))
         lay.addWidget(self.token_edit)
-        lay.addWidget(QLabel("Model penalaran (Muse Spark):"))
+        lay.addWidget(QLabel("Model saran & ringkasan (dipakai untuk saran jawaban dan ringkasan sesi):"))
         lay.addWidget(self.model_box)
-        _mh = QLabel("Terjemahan langsung selalu memakai muse-wonder-1.0 (terukur tercepat); model ini dipakai untuk saran & ringkasan.")
-        _mh.setObjectName("hint"); _mh.setWordWrap(True)
-        lay.addWidget(_mh)
+        lay.addWidget(QLabel("Model terjemahan (dipakai untuk semua terjemahan langsung; muse-wonder-1.0 terukur tercepat ±2,5 detik):"))
+        lay.addWidget(self.translate_model_box)
         lay.addWidget(QLabel("Base URL (lanjutan, biarkan default Meta):"))
         lay.addWidget(self.base_edit)
         lay.addWidget(test_btn)
@@ -121,6 +123,7 @@ class SettingsDialog(QDialog):
     def current_cfg(self):
         cfg = dict(self.cfg)
         cfg["model"] = self.model_box.currentText()
+        cfg["translate_model"] = self.translate_model_box.currentText()
         cfg["base_url"] = self.base_edit.text().strip() or config.DEFAULTS["base_url"]
         return cfg
 
@@ -161,154 +164,6 @@ class SettingsDialog(QDialog):
         self.accept()
 
 
-class Overlay(QWidget):
-    """Bar subtitle lebar di bawah layar: saran, asli, terjemahan besar."""
-
-    def __init__(self):
-        super().__init__(None, Qt.WindowType.FramelessWindowHint
-                         | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.badge = QLabel("")
-        self.suggested = QLabel("")
-        self.original = QLabel("")
-        self.translated = QLabel("")
-        self.badge.setStyleSheet(
-            "color:#5eead4;font-size:11px;font-weight:700;"
-            "background:rgba(13,60,55,200);padding:2px 8px;border-radius:6px;")
-        self.suggested.setStyleSheet(
-            "color:#fde68a;font-size:15px;background:rgba(60,42,4,205);"
-            "padding:6px 10px;border-radius:8px;")
-        self.original.setStyleSheet(
-            "color:#aebdd0;font-size:14px;background:rgba(8,12,18,190);"
-            "padding:5px 10px;border-radius:8px;")
-        self.translated.setStyleSheet(
-            "color:#ffffff;font-size:22px;font-weight:600;"
-            "background:rgba(8,12,18,215);padding:7px 10px;border-radius:8px;")
-        for lab in (self.badge, self.suggested, self.original, self.translated):
-            lab.setWordWrap(True)
-            lab.hide()
-        self._font = 22
-        # Kontrol yang bisa diklik langsung di overlay (tanpa hafal F7/F8).
-        ctl_style = ("QPushButton{background:rgba(20,30,44,215);color:#dbe4ee;"
-                     "border:1px solid #31445e;border-radius:6px;padding:3px 9px;font-size:12px;}"
-                     "QPushButton:hover{background:rgba(42,61,89,230);}")
-        self.btn_smaller = QPushButton("A− Kecilkan")
-        self.btn_bigger = QPushButton("A+ Besarkan")
-        self.btn_hide = QPushButton("✕ Sembunyikan")
-        for b in (self.btn_smaller, self.btn_bigger, self.btn_hide):
-            b.setStyleSheet(ctl_style)
-        self.btn_hide.clicked.connect(self.hide)
-        self.btn_bigger.clicked.connect(lambda: self._zoom(1))
-        self.btn_smaller.clicked.connect(lambda: self._zoom(-1))
-        ctl_row = QHBoxLayout()
-        ctl_row.setContentsMargins(0, 0, 0, 0)
-        ctl_row.addStretch(1)
-        ctl_row.addWidget(self.btn_smaller)
-        ctl_row.addWidget(self.btn_bigger)
-        ctl_row.addWidget(self.btn_hide)
-        self._controls = QWidget()
-        self._controls.setLayout(ctl_row)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(5)
-        lay.addWidget(self._controls)
-        lay.addWidget(self.badge, alignment=Qt.AlignmentFlag.AlignLeft)
-        lay.addWidget(self.suggested)
-        lay.addWidget(self.original)
-        lay.addWidget(self.translated)
-        screen = QApplication.primaryScreen().availableGeometry()
-        width = min(1120, screen.width() - 80)
-        self._width = width
-        self.resize(width, 190)
-        self.move(screen.center().x() - width // 2, screen.bottom() - 215)
-
-    def _fit(self):
-        """Tinggi mengikuti isi pada lebar aktual (sizeHint meremehkan label
-        word-wrap, jadi teks panjang tetap terpotong bila memakainya)."""
-        bottom = self.y() + self.height()
-        labs = [lab for lab in (self.badge, self.suggested, self.original, self.translated)
-                if not lab.isHidden()]
-        total = (self._controls.sizeHint().height()
-                 + sum(lab.heightForWidth(self._width) for lab in labs)
-                 + 5 * max(0, len(labs)))
-        screen = QApplication.primaryScreen()
-        cap = screen.availableGeometry().height() if screen else total
-        self.resize(self._width, min(max(40, total), cap))
-        if screen:
-            geo = screen.availableGeometry()
-            self.move(self.x(), max(geo.top(), min(bottom - self.height(), geo.bottom() - self.height())))
-
-    def _apply_font(self):
-        self.translated.setStyleSheet(
-            f"color:#ffffff;font-size:{self._font}px;font-weight:600;"
-            "background:rgba(8,12,18,215);padding:7px 10px;border-radius:8px;")
-
-    def _zoom(self, arah: int):
-        self._font = max(14, min(38, self._font + 2 * arah))
-        self._width = max(520, min(1600, self._width + 70 * arah))
-        self._apply_font()
-        self._fit()
-
-    def show_processing(self, text: str):
-        self.badge.setText(text)
-        self.badge.show()
-        self._fit()
-
-    def toggle_click_through(self) -> bool:
-        on = not self.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, on)
-        return on
-
-    def show_live(self, who: str):
-        self.badge.setText("● " + who.upper() + " BERBICARA…")
-        self.badge.show()
-        self._fit()
-
-    def show_suggestion(self, text: str):
-        self.suggested.setText(text)
-        self.suggested.setVisible(bool(text))
-        self._fit()
-
-    def show_original(self, text: str):
-        self.original.setText(text)
-        self.original.setVisible(bool(text))
-        self._fit()
-
-    def show_translated(self, text: str):
-        self.translated.setText(text)
-        self.translated.setVisible(bool(text))
-        self._fit()
-
-    def clear_live(self):
-        self.badge.hide()
-
-    # Seret untuk memindah, roda mouse untuk memperbesar/kecil, F8 sembunyi.
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_offset = event.globalPosition().toPoint() - self.pos()
-            event.accept()
-
-    def mouseMoveEvent(self, event):
-        if getattr(self, "_drag_offset", None) is not None and event.buttons() & Qt.MouseButton.LeftButton:
-            self.move(event.globalPosition().toPoint() - self._drag_offset)
-            event.accept()
-
-    def mouseReleaseEvent(self, event):
-        self._drag_offset = None
-
-    def wheelEvent(self, event):
-        step = 60 if event.angleDelta().y() > 0 else -60
-        width = max(560, min(1500, self.width() + step))
-        self._width = width
-        screen = QApplication.primaryScreen().availableGeometry()
-        self.resize(width, self.height())
-        self.move(max(screen.left(), min(self.x(), screen.right() - width)), self.y())
-        self._font = max(15, min(34, int(width / 50)))
-        self._apply_font()
-        self._fit()
-        event.accept()
-
-
 def _card(title: str, hint: str) -> tuple[QFrame, QVBoxLayout]:
     frame = QFrame()
     frame.setObjectName("card")
@@ -337,7 +192,7 @@ class MainWindow(QMainWindow):
         self.brain = None
         self.captures = []
         self.stts = []
-        self.overlay = Overlay()
+        self._panel_font = 22
         self.private_mode = False
         self._gen = 0  # nomor generasi sesi: hasil thread sesi lama dibuang
         self._keywords = []
@@ -359,10 +214,14 @@ class MainWindow(QMainWindow):
             "border-radius:12px;padding:5px 12px;font-size:12px;")
         settings_btn = QPushButton("Pengaturan & Tes Koneksi")
         settings_btn.clicked.connect(self.open_settings)
+        self.session_btn = QPushButton("⚙ Pengaturan Sesi ▾")
+        self.session_btn.setCheckable(True)
+        self.session_btn.clicked.connect(self.toggle_settings_panel)
         head_row = QHBoxLayout()
         head_row.addWidget(header)
         head_row.addWidget(self.status_pill)
         head_row.addStretch(1)
+        head_row.addWidget(self.session_btn)
         head_row.addWidget(settings_btn)
 
         self.context_edit = QPlainTextEdit()
@@ -422,14 +281,11 @@ class MainWindow(QMainWindow):
         self.private_btn.clicked.connect(self.toggle_private)
         export_btn = QPushButton("Ekspor transkrip .md")
         export_btn.clicked.connect(self.export_md)
-        self.overlay_btn = QPushButton("Sembunyikan Overlay (F8)")
-        self.overlay_btn.clicked.connect(self.toggle_overlay)
         action_row = QHBoxLayout()
         action_row.addWidget(self.start_btn, 2)
         action_row.addWidget(self.stop_btn, 2)
         util_row = QHBoxLayout()
         util_row.addWidget(self.private_btn)
-        util_row.addWidget(self.overlay_btn)
         util_row.addWidget(export_btn)
         util_row.addStretch(1)
 
@@ -438,31 +294,72 @@ class MainWindow(QMainWindow):
         self.log = QTextEdit(readOnly=True)
         self.log.setPlaceholderText("Transkrip sesi tampil di sini…")
         self.log.document().setMaximumBlockCount(500)  # sesi panjang tidak makin lambat
-        card3, lay3 = _card("3 · Percakapan langsung", "Bar hijau = suara tertangkap. Overlay subtitle: seret untuk memindah, roda mouse untuk mengubah ukuran, F8 sembunyikan/tampilkan, F7 tembus-klik (klik menembus ke Zoom/Meet).")
+        card3, lay3 = _card("Percakapan langsung", "Bar hijau = suara tertangkap. Panel di bawah menampilkan ucapan lawan, terjemahan besar, dan saran jawaban — semua di dalam aplikasi.")
         meter_row = QHBoxLayout()
         meter_row.addWidget(QLabel("Lawan:"))
         meter_row.addWidget(self.level_loop, 1)
         meter_row.addWidget(QLabel("Kamu:"))
         meter_row.addWidget(self.level_mic, 1)
         lay3.addLayout(meter_row)
+        # Panel langsung pengganti overlay: lencana proses, saran, asli, terjemahan.
+        self.panel_badge = QLabel("")
+        self.panel_badge.setStyleSheet(
+            "color:#5eead4;font-size:12px;font-weight:700;"
+            "background:#0d3c37;padding:3px 9px;border-radius:6px;")
+        self.panel_suggested = QLabel("")
+        self.panel_suggested.setStyleSheet(
+            "color:#fde68a;font-size:15px;background:#3c2a04;"
+            "padding:7px 10px;border-radius:8px;")
+        self.panel_original = QLabel("")
+        self.panel_original.setStyleSheet(
+            "color:#aebdd0;font-size:14px;background:#080c12;"
+            "padding:6px 10px;border-radius:8px;")
+        self.panel_translated = QLabel("")
+        for lab in (self.panel_badge, self.panel_suggested, self.panel_original, self.panel_translated):
+            lab.setWordWrap(True)
+            lab.hide()
+        self._apply_panel_font()
+        self.btn_font_smaller = QPushButton("A− Kecilkan")
+        self.btn_font_smaller.clicked.connect(lambda: self._panel_zoom(-1))
+        self.btn_font_bigger = QPushButton("A+ Besarkan")
+        self.btn_font_bigger.clicked.connect(lambda: self._panel_zoom(1))
+        panel_head = QHBoxLayout()
+        panel_head.addWidget(self.panel_badge)
+        panel_head.addStretch(1)
+        panel_head.addWidget(self.btn_font_smaller)
+        panel_head.addWidget(self.btn_font_bigger)
+        lay3.addLayout(panel_head)
+        lay3.addWidget(self.panel_suggested)
+        lay3.addWidget(self.panel_original)
+        lay3.addWidget(self.panel_translated)
         self.busy_bar = QProgressBar(minimum=0, maximum=0)  # berputar selama proses AI
         self.busy_bar.hide()
         lay3.addWidget(self.busy_bar)
-        lay3.addWidget(self.log)
+        lay3.addWidget(self.log, 1)
+
+        # Menu pengaturan sesi: konteks + bahasa + mode, terlipat bawaan agar
+        # kotak percakapan mendapat ruang penuh.
+        self.settings_panel = QWidget()
+        sp_lay = QVBoxLayout(self.settings_panel)
+        sp_lay.setContentsMargins(0, 0, 0, 0)
+        sp_lay.setSpacing(12)
+        sp_lay.addWidget(card1)
+        sp_lay.addWidget(card2)
+        self.settings_panel.hide()
 
         root = QVBoxLayout()
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(12)
         root.addLayout(head_row)
-        root.addWidget(card1)
-        root.addWidget(card2)
         root.addLayout(action_row)
         root.addLayout(util_row)
+        root.addWidget(self.settings_panel)
         root.addWidget(card3, 1)
         central = QWidget(); central.setLayout(root)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(central)
         self.setCentralWidget(scroll)
-        self.resize(920, 720)
+        self.resize(1080, 880)
+        self.setMinimumSize(860, 640)
         self._wire()
 
     # ---------- kabel sinyal & status ----------
@@ -477,8 +374,6 @@ class MainWindow(QMainWindow):
         self.bridge.status.connect(self.set_status)
         self.bridge.status.connect(self._busy_watch)
         QShortcut(QKeySequence("F9"), self).activated.connect(self.private_btn.click)
-        QShortcut(QKeySequence("F8"), self).activated.connect(self.toggle_overlay)
-        QShortcut(QKeySequence("F7"), self).activated.connect(self.toggle_click_through)
         self._meter_timer = QTimer(self)
         self._meter_timer.timeout.connect(self.tick_levels)
         self._meter_timer.start(200)
@@ -486,14 +381,31 @@ class MainWindow(QMainWindow):
         self._interim_timer.timeout.connect(self.maybe_interim)
         self._interim_timer.start(300)
 
-    def toggle_overlay(self):
-        tampil = not self.overlay.isVisible()
-        self.overlay.setVisible(tampil)
-        self.overlay_btn.setText("Sembunyikan Overlay (F8)" if tampil else "Tampilkan Overlay (F8)")
+    def toggle_settings_panel(self):
+        tampil = self.session_btn.isChecked()
+        self.settings_panel.setVisible(tampil)
+        self.session_btn.setText("⚙ Pengaturan Sesi ▴" if tampil else "⚙ Pengaturan Sesi ▾")
+
+    def _apply_panel_font(self):
+        self.panel_translated.setStyleSheet(
+            f"color:#ffffff;font-size:{self._panel_font}px;font-weight:600;"
+            "background:#080c12;padding:8px 10px;border-radius:8px;")
+
+    def _panel_zoom(self, arah: int):
+        self._panel_font = max(14, min(38, self._panel_font + 2 * arah))
+        self._apply_panel_font()
+
+    def _panel_processing(self, text: str):
+        self.panel_badge.setText(text)
+        self.panel_badge.show()
+
+    def _panel_show(self, label: QLabel, text: str):
+        label.setText(text)
+        label.setVisible(bool(text))
 
     def on_suggestion(self, text: str):
-        self.overlay.show_suggestion(text)
-        self.overlay.clear_live()  # proses AI untuk giliran ini selesai
+        self._panel_show(self.panel_suggested, text)
+        self.panel_badge.hide()  # proses AI untuk giliran ini selesai
 
     def set_busy(self, on: bool, text: str = ""):
         self.busy_bar.setVisible(on)
@@ -527,11 +439,6 @@ class MainWindow(QMainWindow):
             self.set_status(
                 f"Pengaturan tersimpan — token terisi ({config.token_hint(tok)}), siap dimulai"
                 if tok else "Pengaturan tersimpan — token masih kosong")
-
-    def toggle_click_through(self):
-        on = self.overlay.toggle_click_through()
-        self.set_status("Overlay tembus-klik aktif (F7 untuk mematikan)"
-                        if on else "Overlay tembus-klik mati (F7 untuk menyalakan)")
 
     def toggle_private(self):
         self.private_mode = self.private_btn.isChecked()
@@ -579,7 +486,7 @@ class MainWindow(QMainWindow):
         if snapshot != self._partial and not self._partial.startswith(snapshot):
             return
         if self._active and translated.strip():
-            self.overlay.show_translated(translated)
+            self._panel_show(self.panel_translated, translated)
 
     # ---------- siklus sesi ----------
     def start_session(self):
@@ -635,8 +542,6 @@ class MainWindow(QMainWindow):
         self._active = True
         self._partial = ""
         self._interim_snapshot = ""
-        self.overlay.show()
-        self.overlay_btn.setText("Sembunyikan Overlay (F8)")
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self.set_busy(False)
@@ -647,24 +552,24 @@ class MainWindow(QMainWindow):
             return
         if who == "Lawan" and text:
             self._partial = text
-            self.overlay.show_live("Lawan")
-            self.overlay.show_original(text)
+            self._panel_processing("● LAWAN BERBICARA…")
+            self._panel_show(self.panel_original, text)
 
     def on_opponent(self, text):
         if not self._active:
             return  # final terlambat dari stream sesi lama
         self._partial = ""
         self._interim_snapshot = ""
-        self.overlay.clear_live()
+        self.panel_badge.hide()
         opp, mine = self.cfg["opponent_lang"], self.cfg["my_lang"]
         turn = self.session.add("Lawan", text)
         self.log.append(f"<b>Lawan:</b> {html.escape(text)}")
-        self.overlay.show_original(text)
+        self._panel_show(self.panel_original, text)
         brain, session = self.brain, self.session
         gen = self._gen
         mode = self.cfg["mode"]
         history = session.history_text()
-        self.overlay.show_processing("⏳ Menerjemahkan…")
+        self._panel_processing("⏳ Menerjemahkan…")
 
         # Terjemahan dan saran jalan paralel: terjemahan (model cepat) tampil
         # duluan, saran menyusul. Dulu keduanya digabung satu panggilan
@@ -716,15 +621,15 @@ class MainWindow(QMainWindow):
 
     def on_translation(self, original, translated):
         if not translated.strip():
-            self.overlay.clear_live()
+            self.panel_badge.hide()
             self.set_status("Terjemahan kembali kosong dari AI — periksa model/token di Pengaturan")
             self.log.append("<i>→ (kosong dari AI)</i>")
             return
-        self.overlay.show_translated(translated)
+        self._panel_show(self.panel_translated, translated)
         if self.cfg["mode"] == "conversation":
-            self.overlay.show_processing("⏳ Terjemahan tampil — menyusun saran…")
+            self._panel_processing("⏳ Terjemahan tampil — menyusun saran…")
         else:
-            self.overlay.clear_live()
+            self.panel_badge.hide()
         self.log.append(f"<i>→ {html.escape(translated)}</i>")
 
     def stop_streams(self):
@@ -739,8 +644,7 @@ class MainWindow(QMainWindow):
         for c in self.captures:
             c.wait(timeout=2)
         self.stts, self.captures = [], []
-        self.overlay.clear_live()
-        self.overlay.hide()
+        self.panel_badge.hide()
 
     def end_session(self):
         # Kabari dulu, baru bekerja: menghentikan stream bisa makan detik dan
@@ -748,7 +652,7 @@ class MainWindow(QMainWindow):
         self.set_busy(True, "Mengakhiri sesi — menghentikan audio, lalu menyusun ringkasan…")
         self.stop_btn.setEnabled(False)
         self.start_btn.setEnabled(False)
-        self.overlay.show_processing("⏳ Mengakhiri sesi…")
+        self._panel_processing("⏳ Mengakhiri sesi…")
         QApplication.processEvents()
         self.stop_streams()
         self._end_gen = self._gen
