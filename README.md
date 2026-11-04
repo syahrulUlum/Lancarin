@@ -18,7 +18,8 @@ python -m venv .venv
 ```
 
 1. Klik **Pengaturan & Tes Koneksi**, isi token Meta Model API
-   (dari https://dev.meta.ai), pilih model, jalankan Tes Koneksi.
+   (dari https://dev.meta.ai), pilih model, jalankan Tes Koneksi sampai ✓,
+   lalu **Simpan** — Mulai Sesi terkunci sampai tes lolos untuk model itu.
 2. Isi deskripsi konteks (opsional), pilih bahasa lawan/saya dan mode.
 3. **Mulai Sesi** — putar video/panggilan; overlay menampilkan transkrip,
    terjemahan, dan saran jawaban. `F9` = mode Cek Ucapan privat.

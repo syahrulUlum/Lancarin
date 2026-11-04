@@ -47,19 +47,39 @@ class RealtimeSTT(threading.Thread):
         self.on_final = on_final
         self.on_error = on_error
         self._stopped = threading.Event()
+        self._loop = None
+        self._ws = None
 
     def stop(self):
         self._stopped.set()
+        ws, loop = self._ws, self._loop
+        if ws is not None and loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(lambda: asyncio.ensure_future(ws.close()))
 
     def run(self):
-        try:
-            run_event_loop(self._main())
-        except Exception as exc:
-            if not self._stopped.is_set():
+        # Satu kali reconnect: putus sesaat (termasuk tutup bersih dari server)
+        # tidak boleh membunuh sesi diam-diam.
+        for attempt in range(2):
+            if self._stopped.is_set():
+                return
+            try:
+                run_event_loop(self._main())
+                exc = RuntimeError("Koneksi STT ditutup server")
+            except Exception as err:
+                exc = err
+            if self._stopped.is_set():
+                return
+            if attempt == 1:
                 self.on_error(str(exc)[:200])
+            else:
+                self._stopped.wait(1.0)
 
     async def _main(self):
         async with websockets.connect(URL, open_timeout=20, max_size=None) as ws:
+            self._loop = asyncio.get_running_loop()
+            self._ws = ws
+            if self._stopped.is_set():
+                return  # stop datang saat connect: langsung tutup lewat async with
             handshake = {
                 "authorization": {"accessToken": f"Bearer {self.token}"},
                 "audioEncoding": "PCM_24KHZ",
@@ -72,7 +92,7 @@ class RealtimeSTT(threading.Thread):
             if self.keywords:
                 handshake["keywords"] = self.keywords
             await ws.send(json.dumps(handshake))
-            reply = json.loads(await ws.recv())
+            reply = json.loads(await asyncio.wait_for(ws.recv(), timeout=20))
             if "sessionId" not in reply:
                 raise RuntimeError(f"Handshake gagal: {reply}")
 

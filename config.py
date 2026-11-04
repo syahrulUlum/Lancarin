@@ -30,8 +30,6 @@ DEFAULTS = {
     "opponent_lang": "English",
     "my_lang": "Indonesian",
     "mode": "conversation",
-    "hotkey_enabled": False,
-    "hotkey_mute": "alt+a",
 }
 
 

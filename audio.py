@@ -73,8 +73,9 @@ def list_devices():
 class Capture:
     """Satu stream perangkat -> antrean potongan PCM 24 kHz (bytes)."""
 
-    def __init__(self, device_index: int):
+    def __init__(self, device_index: int, on_error=None):
         self.device_index = device_index
+        self.on_error = on_error
         self.frames: queue.Queue[bytes] = queue.Queue(maxsize=200)
         self.level = 0.0
         self._stop = threading.Event()
@@ -86,6 +87,10 @@ class Capture:
 
     def stop(self):
         self._stop.set()
+
+    def wait(self, timeout=None):
+        if self._thread:
+            self._thread.join(timeout)
 
     def _run(self):
         pa = _get_pa()
@@ -105,9 +110,10 @@ class Capture:
                     self.frames.put_nowait(_to_pcm24(data, rate, channels))
                 except queue.Full:
                     pass
-        except Exception:
-            if not self._stop.is_set():
-                raise
+        except Exception as exc:
+            # Jangan raise di thread: exe tanpa konsol menelannya diam-diam.
+            if not self._stop.is_set() and self.on_error:
+                self.on_error(str(exc)[:200])
         finally:
             if stream:
                 stream.close()

@@ -26,7 +26,7 @@ class FakeBrain:
 class TestInterim(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.qapp = QApplication([])
+        cls.qapp = QApplication.instance() or QApplication([])
 
     def test_interim_updates_overlay_without_final(self):
         win = appmod.MainWindow()
