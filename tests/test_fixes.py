@@ -53,15 +53,6 @@ class TestBrainFixes(unittest.TestCase):
         self.assertEqual(FakeOpenAI.last_kwargs.get("timeout"), 60.0)
         self.assertEqual(FakeOpenAI.last_kwargs.get("max_retries"), 1)
 
-    def test_translate_and_suggest_satu_panggilan(self):
-        b = ChatBrain("TRANSLATION: Halo\nREPLY: Hi, nice to meet you\nMEANING: Halo, senang bertemu")
-        hasil, saran = b.translate_and_suggest(
-            "Hello", "interview", "Lawan: hi", "English", "Indonesian", ["Budi"])
-        self.assertEqual(hasil, "Halo")
-        self.assertEqual(saran, "Hi, nice to meet you\nHalo, senang bertemu")
-        self.assertEqual(len(b.calls), 1)
-        self.assertIn("Budi", b.calls[0][1])
-
     def test_suggest_label_generik(self):
         b = ChatBrain("REPLY: Bonjour\nMEANING: Halo")
         out = b.suggest("ctx", "hist", "Salut", "French", "Indonesian")
@@ -106,19 +97,21 @@ class RecOpenAI:
 
 
 class TestTimeoutPerPanggilan(unittest.TestCase):
-    def test_translate_timeout_pendek_gabungan_panjang(self):
+    def test_translate_model_cepat_dan_timeout_pendek(self):
         orig = brain_mod.OpenAI
         brain_mod.OpenAI = RecOpenAI
         try:
-            b = brain_mod.Brain({"model": "m", "base_url": "https://x"}, "tok")
+            b = brain_mod.Brain({"model": "muse-spark-1.3", "base_url": "https://x"}, "tok")
             b.translate("halo", "Indonesian", "English")
-            kw_translate = RecOpenAI.last.chat.completions.kwargs
-            b.translate_and_suggest("halo", "", "", "Indonesian", "English")
-            kw_gabungan = RecOpenAI.last.chat.completions.kwargs
+            kw = RecOpenAI.last.chat.completions.kwargs
+            b.chat("sys", "usr")  # jalur saran/ringkasan tetap model pilihan
+            kw_chat = RecOpenAI.last.chat.completions.kwargs
         finally:
             brain_mod.OpenAI = orig
-        self.assertEqual(kw_translate.get("timeout"), 15.0)
-        self.assertEqual(kw_gabungan.get("timeout"), 60.0)
+        self.assertEqual(kw.get("timeout"), 15.0)
+        self.assertEqual(kw.get("model"), "muse-wonder-1.0",
+                         "terjemahan harus memakai model tercepat terukur, bukan model reasoning pilihan")
+        self.assertEqual(kw_chat.get("model"), "muse-spark-1.3")
 
 
 class TestAudioError(unittest.TestCase):
@@ -204,15 +197,20 @@ import app as appmod  # noqa: E402
 
 
 class CombinedBrain:
+    """translate cepat, suggest lambat: terjemahan harus tampil duluan."""
+
     def __init__(self):
         self.calls = []
-
-    def translate_and_suggest(self, *args):
-        self.calls.append(args)
-        return "Halo terjemahan", "Jawaban saran\nArti saran"
+        self.suggest_calls = []
 
     def translate(self, *args):
-        raise AssertionError("mode percakapan tidak boleh memanggil translate terpisah")
+        self.calls.append(args)
+        return "Halo terjemahan"
+
+    def suggest(self, *args):
+        self.suggest_calls.append(args)
+        time.sleep(0.8)
+        return "Jawaban saran\nArti saran"
 
 
 class TestAppFixes(unittest.TestCase):
@@ -252,16 +250,86 @@ class TestAppFixes(unittest.TestCase):
         self.qapp.processEvents()
         self.assertFalse(win.overlay.isVisible())
 
-    def test_mode_percakapan_satu_panggilan_gabungan(self):
+    def test_terjemahan_tampil_sebelum_saran_selesai(self):
         win = self._win()
         win.brain = CombinedBrain()
         win.cfg["mode"] = "conversation"
         win._active = True
         win.on_opponent("Hello there")
-        ok = self._pump_until(lambda: "Jawaban saran" in win.overlay.suggested.text())
-        self.assertTrue(ok, "saran gabungan tidak tampil")
+        ok = self._pump_until(lambda: win.overlay.translated.text() == "Halo terjemahan", timeout=0.5)
+        self.assertTrue(ok, "terjemahan tidak tampil duluan (masih menunggu saran)")
+        self.assertTrue(self._pump_until(lambda: "Jawaban saran" in win.overlay.suggested.text()))
         self.assertEqual(len(win.brain.calls), 1)
-        self.assertIn("Halo terjemahan", win.log.toPlainText())
+        self.assertEqual(len(win.brain.suggest_calls), 1)
+        win.stop_streams()
+
+    def test_tombol_overlay_hide_dan_ukuran(self):
+        ov = appmod.Overlay()
+        ov.show()
+        self.qapp.processEvents()
+        self.assertTrue(ov.isVisible())
+        ov.btn_hide.click()
+        self.qapp.processEvents()
+        self.assertFalse(ov.isVisible(), "tombol sembunyikan overlay tidak bekerja")
+        ov.show()
+        lebar, font = ov._width, ov._font
+        ov.btn_bigger.click()
+        self.assertGreater(ov._width, lebar)
+        self.assertGreater(ov._font, font)
+        ov.btn_smaller.click()
+        self.assertEqual(ov._font, font)
+
+    def test_tombol_tampilkan_overlay_di_jendela_utama(self):
+        win = self._win()
+        win.overlay.show()
+        win.overlay_btn.click()
+        self.qapp.processEvents()
+        self.assertFalse(win.overlay.isVisible())
+        win.overlay_btn.click()
+        self.qapp.processEvents()
+        self.assertTrue(win.overlay.isVisible())
+
+    def test_akhiri_sesi_ada_indikator_proses(self):
+        class SlowBrain:
+            def summarize(self, *a):
+                time.sleep(1.2)
+                return "Ringkasan jadi"
+
+        win = self._win()
+        win.show()
+        win.session.add("Lawan", "halo dunia")
+        win.brain = SlowBrain()
+        win.end_session()
+        self.assertTrue(win.busy_bar.isVisible(), "tidak ada indikator saat mengakhiri sesi")
+        self.assertFalse(win.start_btn.isEnabled(), "tombol Mulai harus terkunci selama ringkasan diproses")
+        self.assertIn("Mengakhiri", win.status_pill.text())
+        self.assertTrue(self._pump_until(lambda: getattr(win, "_last_summary", "") == "Ringkasan jadi"))
+        self.assertFalse(win.busy_bar.isVisible())
+        self.assertTrue(win.start_btn.isEnabled())
+
+    def test_interim_tidak_terserial_di_belakang_panggilan_lambat(self):
+        class SlowBrain:
+            def __init__(self):
+                self.calls = []
+
+            def translate(self, text, src, dst):
+                self.calls.append(text)
+                time.sleep(0.6)
+                return "T:" + text
+
+        win = self._win()
+        win.brain = SlowBrain()
+        win._active = True
+        win.on_partial("Lawan", "hello how are")
+        win._interim_at = 0.0
+        win.maybe_interim()
+        win.on_partial("Lawan", "hello how are you doing today my friend")
+        win._interim_at = 0.0
+        win.maybe_interim()
+        self.assertEqual(len(win.brain.calls), 2,
+                         "interim kedua harus jalan paralel (latest-wins), bukan menunggu yang pertama")
+        self.assertTrue(self._pump_until(
+            lambda: win.overlay.translated.text() == "T:hello how are you doing today my friend"))
         win.stop_streams()
 
     def test_overlay_tumbuh_untuk_teks_panjang(self):
@@ -277,6 +345,7 @@ class TestAppFixes(unittest.TestCase):
         win = self._win()
         win._active = True
         win.on_partial("Lawan", "hello how are you doing today")
+        win._interim_snapshot = "hello how are"
         win.on_interim("hello how are", "HALO APA KABAR")
         self.assertEqual(win.overlay.translated.text(), "HALO APA KABAR")
 

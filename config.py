@@ -25,7 +25,7 @@ LANGUAGES = [
 ]
 
 DEFAULTS = {
-    "model": "muse-spark-1.3",
+    "model": "muse-wonder-1.0",
     "base_url": "https://api.meta.ai/v1",
     "opponent_lang": "English",
     "my_lang": "Indonesian",

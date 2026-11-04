@@ -109,6 +109,9 @@ class SettingsDialog(QDialog):
         lay.addWidget(self.token_edit)
         lay.addWidget(QLabel("Model penalaran (Muse Spark):"))
         lay.addWidget(self.model_box)
+        _mh = QLabel("Terjemahan langsung selalu memakai muse-wonder-1.0 (terukur tercepat); model ini dipakai untuk saran & ringkasan.")
+        _mh.setObjectName("hint"); _mh.setWordWrap(True)
+        lay.addWidget(_mh)
         lay.addWidget(QLabel("Base URL (lanjutan, biarkan default Meta):"))
         lay.addWidget(self.base_edit)
         lay.addWidget(test_btn)
@@ -184,9 +187,31 @@ class Overlay(QWidget):
         for lab in (self.badge, self.suggested, self.original, self.translated):
             lab.setWordWrap(True)
             lab.hide()
+        self._font = 22
+        # Kontrol yang bisa diklik langsung di overlay (tanpa hafal F7/F8).
+        ctl_style = ("QPushButton{background:rgba(20,30,44,215);color:#dbe4ee;"
+                     "border:1px solid #31445e;border-radius:6px;padding:3px 9px;font-size:12px;}"
+                     "QPushButton:hover{background:rgba(42,61,89,230);}")
+        self.btn_smaller = QPushButton("A− Kecilkan")
+        self.btn_bigger = QPushButton("A+ Besarkan")
+        self.btn_hide = QPushButton("✕ Sembunyikan")
+        for b in (self.btn_smaller, self.btn_bigger, self.btn_hide):
+            b.setStyleSheet(ctl_style)
+        self.btn_hide.clicked.connect(self.hide)
+        self.btn_bigger.clicked.connect(lambda: self._zoom(1))
+        self.btn_smaller.clicked.connect(lambda: self._zoom(-1))
+        ctl_row = QHBoxLayout()
+        ctl_row.setContentsMargins(0, 0, 0, 0)
+        ctl_row.addStretch(1)
+        ctl_row.addWidget(self.btn_smaller)
+        ctl_row.addWidget(self.btn_bigger)
+        ctl_row.addWidget(self.btn_hide)
+        self._controls = QWidget()
+        self._controls.setLayout(ctl_row)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(5)
+        lay.addWidget(self._controls)
         lay.addWidget(self.badge, alignment=Qt.AlignmentFlag.AlignLeft)
         lay.addWidget(self.suggested)
         lay.addWidget(self.original)
@@ -203,13 +228,31 @@ class Overlay(QWidget):
         bottom = self.y() + self.height()
         labs = [lab for lab in (self.badge, self.suggested, self.original, self.translated)
                 if not lab.isHidden()]
-        total = sum(lab.heightForWidth(self._width) for lab in labs) + 5 * max(0, len(labs) - 1)
+        total = (self._controls.sizeHint().height()
+                 + sum(lab.heightForWidth(self._width) for lab in labs)
+                 + 5 * max(0, len(labs)))
         screen = QApplication.primaryScreen()
         cap = screen.availableGeometry().height() if screen else total
         self.resize(self._width, min(max(40, total), cap))
         if screen:
             geo = screen.availableGeometry()
             self.move(self.x(), max(geo.top(), min(bottom - self.height(), geo.bottom() - self.height())))
+
+    def _apply_font(self):
+        self.translated.setStyleSheet(
+            f"color:#ffffff;font-size:{self._font}px;font-weight:600;"
+            "background:rgba(8,12,18,215);padding:7px 10px;border-radius:8px;")
+
+    def _zoom(self, arah: int):
+        self._font = max(14, min(38, self._font + 2 * arah))
+        self._width = max(520, min(1600, self._width + 70 * arah))
+        self._apply_font()
+        self._fit()
+
+    def show_processing(self, text: str):
+        self.badge.setText(text)
+        self.badge.show()
+        self._fit()
 
     def toggle_click_through(self) -> bool:
         on = not self.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -260,10 +303,8 @@ class Overlay(QWidget):
         screen = QApplication.primaryScreen().availableGeometry()
         self.resize(width, self.height())
         self.move(max(screen.left(), min(self.x(), screen.right() - width)), self.y())
-        size = max(15, min(34, int(width / 50)))
-        self.translated.setStyleSheet(
-            f"color:#ffffff;font-size:{size}px;font-weight:600;"
-            "background:rgba(8,12,18,215);padding:7px 10px;border-radius:8px;")
+        self._font = max(15, min(34, int(width / 50)))
+        self._apply_font()
         self._fit()
         event.accept()
 
@@ -381,11 +422,14 @@ class MainWindow(QMainWindow):
         self.private_btn.clicked.connect(self.toggle_private)
         export_btn = QPushButton("Ekspor transkrip .md")
         export_btn.clicked.connect(self.export_md)
+        self.overlay_btn = QPushButton("Sembunyikan Overlay (F8)")
+        self.overlay_btn.clicked.connect(self.toggle_overlay)
         action_row = QHBoxLayout()
         action_row.addWidget(self.start_btn, 2)
         action_row.addWidget(self.stop_btn, 2)
         util_row = QHBoxLayout()
         util_row.addWidget(self.private_btn)
+        util_row.addWidget(self.overlay_btn)
         util_row.addWidget(export_btn)
         util_row.addStretch(1)
 
@@ -401,6 +445,9 @@ class MainWindow(QMainWindow):
         meter_row.addWidget(QLabel("Kamu:"))
         meter_row.addWidget(self.level_mic, 1)
         lay3.addLayout(meter_row)
+        self.busy_bar = QProgressBar(minimum=0, maximum=0)  # berputar selama proses AI
+        self.busy_bar.hide()
+        lay3.addWidget(self.busy_bar)
         lay3.addWidget(self.log)
 
         root = QVBoxLayout()
@@ -424,20 +471,39 @@ class MainWindow(QMainWindow):
         self.bridge.mine_final.connect(self.on_mine)
         self.bridge.partial.connect(self.on_partial)
         self.bridge.interim.connect(self.on_interim)
-        self.bridge.suggestion.connect(self.overlay.show_suggestion)
+        self.bridge.suggestion.connect(self.on_suggestion)
         self.bridge.translation.connect(self.on_translation)
         self.bridge.summary_ready.connect(self.on_summary)
         self.bridge.status.connect(self.set_status)
+        self.bridge.status.connect(self._busy_watch)
         QShortcut(QKeySequence("F9"), self).activated.connect(self.private_btn.click)
-        QShortcut(QKeySequence("F8"), self).activated.connect(
-            lambda: self.overlay.setVisible(not self.overlay.isVisible()))
+        QShortcut(QKeySequence("F8"), self).activated.connect(self.toggle_overlay)
         QShortcut(QKeySequence("F7"), self).activated.connect(self.toggle_click_through)
         self._meter_timer = QTimer(self)
         self._meter_timer.timeout.connect(self.tick_levels)
         self._meter_timer.start(200)
         self._interim_timer = QTimer(self)
         self._interim_timer.timeout.connect(self.maybe_interim)
-        self._interim_timer.start(650)
+        self._interim_timer.start(300)
+
+    def toggle_overlay(self):
+        tampil = not self.overlay.isVisible()
+        self.overlay.setVisible(tampil)
+        self.overlay_btn.setText("Sembunyikan Overlay (F8)" if tampil else "Tampilkan Overlay (F8)")
+
+    def on_suggestion(self, text: str):
+        self.overlay.show_suggestion(text)
+        self.overlay.clear_live()  # proses AI untuk giliran ini selesai
+
+    def set_busy(self, on: bool, text: str = ""):
+        self.busy_bar.setVisible(on)
+        if text:
+            self.set_status(text)
+
+    def _busy_watch(self, text: str):
+        if text.startswith("Ringkasan gagal"):
+            self.set_busy(False)
+            self.start_btn.setEnabled(True)
 
     def set_status(self, text: str):
         live = "berjalan" in text or "PRIVAT" in text
@@ -479,16 +545,18 @@ class MainWindow(QMainWindow):
 
     # ---------- terjemahan interim (sambil lawan masih bicara) ----------
     def maybe_interim(self):
-        if not self._active or self._interim_busy or not self.brain:
+        # Latest-wins: jangan antri di belakang panggilan lambat. Panggilan
+        # baru boleh jalan paralel; hanya hasil dari snapshot terakhir yang
+        # ditampilkan (lihat on_interim).
+        if not self._active or not self.brain:
             return
         text = self._partial.strip()
         if len(text) < 3 or text == self._interim_snapshot:
             return
-        if time.time() - self._interim_at < 1.1:
+        if time.time() - self._interim_at < 0.8:
             return
         if len(text) - len(self._interim_snapshot) < 4 and self._interim_snapshot:
             return
-        self._interim_busy = True
         self._interim_at = time.time()
         self._interim_snapshot = text
         brain, opp, mine = self.brain, self.cfg["opponent_lang"], self.cfg["my_lang"]
@@ -504,8 +572,10 @@ class MainWindow(QMainWindow):
 
     def on_interim(self, snapshot: str, translated: str):
         self._interim_busy = False
-        # Hasil basi (parsial sudah bergerak lebih jauh) dibuang: menampilkannya
-        # membuat overlay mundur ke kalimat lama.
+        # Hanya snapshot terakhir yang boleh tampil; hasil panggilan lama yang
+        # selesai belakangan dibuang agar overlay tidak mundur.
+        if snapshot != self._interim_snapshot:
+            return
         if snapshot != self._partial and not self._partial.startswith(snapshot):
             return
         if self._active and translated.strip():
@@ -531,12 +601,15 @@ class MainWindow(QMainWindow):
         self.cfg.update({"opponent_lang": self.opp_lang.currentText(),
                          "my_lang": self.my_lang.currentText(), "mode": mode})
         config.save(self.cfg)
+        self.set_busy(True, "Memulai sesi — menghubungkan audio & transkripsi…")
+        QApplication.processEvents()
         self.brain = brain_mod.Brain(self.cfg, token)
         self.session = Session(self.context_edit.toPlainText().strip())
         keywords = [k.strip() for k in self.keywords_edit.text().split(",") if k.strip()]
         self._keywords = keywords
         loop_i, mic_i, _ = audio.list_devices()
         if loop_i is None or mic_i is None:
+            self.set_busy(False)
             QMessageBox.warning(self, "Lancarin", f"Perangkat audio tidak lengkap: loopback={loop_i}, mic={mic_i}")
             return
         self._gen += 1
@@ -563,8 +636,10 @@ class MainWindow(QMainWindow):
         self._partial = ""
         self._interim_snapshot = ""
         self.overlay.show()
+        self.overlay_btn.setText("Sembunyikan Overlay (F8)")
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
+        self.set_busy(False)
         self.set_status(f"Sesi berjalan — menerjemahkan {opp} → {mine} secara langsung")
 
     def on_partial(self, who, text):
@@ -586,27 +661,37 @@ class MainWindow(QMainWindow):
         self.log.append(f"<b>Lawan:</b> {html.escape(text)}")
         self.overlay.show_original(text)
         brain, session = self.brain, self.session
-        gen, keywords = self._gen, list(self._keywords)
+        gen = self._gen
         mode = self.cfg["mode"]
+        history = session.history_text()
+        self.overlay.show_processing("⏳ Menerjemahkan…")
 
-        def work():
+        # Terjemahan dan saran jalan paralel: terjemahan (model cepat) tampil
+        # duluan, saran menyusul. Dulu keduanya digabung satu panggilan
+        # sehingga terjemahan ikut menunggu saran selesai (5-10 detik).
+        def work_translate():
             try:
-                if mode == "conversation":
-                    translated, saran = brain.translate_and_suggest(
-                        text, session.context_desc, session.history_text(), opp, mine, keywords)
-                else:
-                    translated, saran = brain.translate(text, opp, mine), ""
+                translated = brain.translate(text, opp, mine)
                 if gen != self._gen:
-                    return  # sesi sudah berganti: hasil lama dibuang
+                    return
                 turn.translation = translated
                 self.bridge.translation.emit(text, translated)
-                if saran:
-                    self.bridge.suggestion.emit("Saran jawab: " + saran.replace("\n", "   ·   "))
             except Exception as exc:
                 if gen == self._gen:
                     self.bridge.status.emit("AI bermasalah: " + str(exc)[:160])
 
-        threading.Thread(target=work, daemon=True).start()
+        threading.Thread(target=work_translate, daemon=True).start()
+        if mode == "conversation":
+            def work_suggest():
+                try:
+                    saran = brain.suggest(session.context_desc, history, text, opp, mine, list(self._keywords))
+                    if gen == self._gen and saran.strip():
+                        self.bridge.suggestion.emit("Saran jawab: " + saran.replace("\n", "   ·   "))
+                except Exception as exc:
+                    if gen == self._gen:
+                        self.bridge.status.emit("Saran bermasalah: " + str(exc)[:160])
+
+            threading.Thread(target=work_suggest, daemon=True).start()
 
     def on_mine(self, text):
         if not self._active:
@@ -631,10 +716,15 @@ class MainWindow(QMainWindow):
 
     def on_translation(self, original, translated):
         if not translated.strip():
+            self.overlay.clear_live()
             self.set_status("Terjemahan kembali kosong dari AI — periksa model/token di Pengaturan")
             self.log.append("<i>→ (kosong dari AI)</i>")
             return
         self.overlay.show_translated(translated)
+        if self.cfg["mode"] == "conversation":
+            self.overlay.show_processing("⏳ Terjemahan tampil — menyusun saran…")
+        else:
+            self.overlay.clear_live()
         self.log.append(f"<i>→ {html.escape(translated)}</i>")
 
     def stop_streams(self):
@@ -653,14 +743,21 @@ class MainWindow(QMainWindow):
         self.overlay.hide()
 
     def end_session(self):
+        # Kabari dulu, baru bekerja: menghentikan stream bisa makan detik dan
+        # tanpa ini aplikasi terlihat membeku tanpa penjelasan.
+        self.set_busy(True, "Mengakhiri sesi — menghentikan audio, lalu menyusun ringkasan…")
+        self.stop_btn.setEnabled(False)
+        self.start_btn.setEnabled(False)
+        self.overlay.show_processing("⏳ Mengakhiri sesi…")
+        QApplication.processEvents()
         self.stop_streams()
         self._end_gen = self._gen
-        self.start_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
         if not self.brain or not self.session.turns:
+            self.set_busy(False)
+            self.start_btn.setEnabled(True)
             self.set_status("Sesi berakhir — belum ada percakapan terekam")
             return
-        self.set_status("Menyusun ringkasan sesi…")
+        self.set_busy(True, "Mengakhiri sesi — menyusun ringkasan (biasanya belasan detik)…")
         brain, session, mine = self.brain, self.session, self.cfg["my_lang"]
         end_gen = self._gen
 
@@ -678,6 +775,8 @@ class MainWindow(QMainWindow):
     def on_summary(self, summary):
         if getattr(self, "_end_gen", self._gen) != self._gen:
             return  # ringkasan sesi lama, sesi baru sudah berjalan
+        self.set_busy(False)
+        self.start_btn.setEnabled(True)
         if not summary.strip():
             self.set_status("Ringkasan kembali kosong dari AI — transkrip tetap bisa diekspor")
             QMessageBox.warning(self, "Ringkasan Sesi",

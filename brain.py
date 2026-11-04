@@ -6,6 +6,9 @@ from openai import OpenAI
 import config
 
 CHUNK_CHARS = 8000
+# Terjemahan harus secepat mungkin: terukur di mesin ini wonder menjawab
+# 2-5 detik vs Spark 4-10 detik. Saran/ringkasan tetap model pilihan user.
+FAST_MODEL = "muse-wonder-1.0"
 
 
 def _parse(raw: str, *labels: str) -> dict[str, str]:
@@ -32,11 +35,11 @@ class Brain:
                              timeout=60.0, max_retries=1)
         self.model = cfg["model"]
 
-    def chat(self, system: str, user: str, timeout: float = 60.0) -> str:
+    def chat(self, system: str, user: str, timeout: float = 60.0, model: str = None) -> str:
         # Tanpa max_tokens: pada Muse Spark batas kecil dimakan proses
         # penalaran model dan content akhir kembali kosong.
         r = self.client.chat.completions.create(
-            model=self.model,
+            model=model or self.model,
             messages=[{"role": "system", "content": system},
                       {"role": "user", "content": user}],
             timeout=timeout,
@@ -50,33 +53,11 @@ class Brain:
             f"You are a precise live interpreter. Translate from {src} to {dst}. "
             "The text may be an unfinished sentence fragment; translate what is there. "
             "Output ONLY the translation, no quotes, no notes.",
-            text, timeout=15.0,
+            text, timeout=15.0, model=FAST_MODEL,
         )
-
-    def translate_and_suggest(self, text: str, context_desc: str, history: str,
-                              src: str, dst: str, keywords=None) -> tuple[str, str]:
-        """Satu panggilan untuk terjemahan + saran: separuh latensi jalur lama."""
-        if src == dst:
-            return text, ""
-        system = (
-            f"You are a precise live interpreter and conversation coach. The other person speaks {src}; "
-            f"the user speaks {dst} and must reply in {src}. Use the full history so the reply stays coherent. "
-            "Output exactly three lines:\n"
-            f"TRANSLATION: <translation of the other person's text into {dst}>\n"
-            f"REPLY: <natural short reply in {src}>\n"
-            f"MEANING: <same reply translated to {dst}>"
-        )
-        user = (f"Context: {context_desc or '-'}\n"
-                f"Names/terms: {', '.join(keywords or []) or '-'}\n\n"
-                f"History:\n{history or '-'}\n\nOther person just said: {text}")
-        got = _parse(self.chat(system, user), "TRANSLATION", "REPLY", "MEANING")
-        saran = "\n".join(x for x in (got.get("REPLY", ""), got.get("MEANING", "")) if x)
-        if not got.get("TRANSLATION"):
-            return self.translate(text, src, dst), saran
-        return got["TRANSLATION"], saran
 
     def suggest(self, context_desc: str, history: str, opponent_text: str,
-                opponent_lang: str, my_lang: str) -> str:
+                opponent_lang: str, my_lang: str, keywords=None) -> str:
         system = (
             "You help a non-native speaker answer live in a conversation. "
             f"The other person speaks {opponent_lang}; the user speaks {my_lang} and must reply in {opponent_lang}. "
@@ -85,7 +66,8 @@ class Brain:
             f"REPLY: <natural short reply in {opponent_lang}>\n"
             f"MEANING: <same reply translated to {my_lang}>"
         )
-        user = f"Context: {context_desc or '-'}\n\nHistory:\n{history or '-'}\n\nOther person just said: {opponent_text}"
+        user = (f"Context: {context_desc or '-'}\nNames/terms: {', '.join(keywords or []) or '-'}\n\n"
+                f"History:\n{history or '-'}\n\nOther person just said: {opponent_text}")
         raw = self.chat(system, user)
         got = _parse(raw, "REPLY", "MEANING", "EN", "ID")
         reply = got.get("REPLY") or got.get("EN", "")
