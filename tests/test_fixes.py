@@ -50,7 +50,7 @@ class TestBrainFixes(unittest.TestCase):
             brain_mod.Brain({"model": "m", "base_url": "https://x"}, "tok")
         finally:
             brain_mod.OpenAI = orig
-        self.assertEqual(FakeOpenAI.last_kwargs.get("timeout"), 20.0)
+        self.assertEqual(FakeOpenAI.last_kwargs.get("timeout"), 60.0)
         self.assertEqual(FakeOpenAI.last_kwargs.get("max_retries"), 1)
 
     def test_translate_and_suggest_satu_panggilan(self):
@@ -73,6 +73,52 @@ class TestBrainFixes(unittest.TestCase):
         out = b.summarize("ctx", panjang, "Indonesian")
         self.assertEqual(out, "RINGKASAN")
         self.assertGreater(len(b.calls), 1, "transkrip panjang harus diringkas bertahap, bukan satu panggilan raksasa")
+
+
+class _Msg:
+    content = "TRANSLATION: x\nREPLY: y\nMEANING: z"
+
+
+class _Choice:
+    message = _Msg()
+
+
+class _Resp:
+    choices = [_Choice()]
+
+
+class _RecCompletions:
+    def __init__(self):
+        self.kwargs = None
+
+    def create(self, **kwargs):
+        self.kwargs = kwargs
+        return _Resp()
+
+
+class RecOpenAI:
+    last = None
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.chat = type("C", (), {"completions": _RecCompletions()})()
+        RecOpenAI.last = self
+
+
+class TestTimeoutPerPanggilan(unittest.TestCase):
+    def test_translate_timeout_pendek_gabungan_panjang(self):
+        orig = brain_mod.OpenAI
+        brain_mod.OpenAI = RecOpenAI
+        try:
+            b = brain_mod.Brain({"model": "m", "base_url": "https://x"}, "tok")
+            b.translate("halo", "Indonesian", "English")
+            kw_translate = RecOpenAI.last.chat.completions.kwargs
+            b.translate_and_suggest("halo", "", "", "Indonesian", "English")
+            kw_gabungan = RecOpenAI.last.chat.completions.kwargs
+        finally:
+            brain_mod.OpenAI = orig
+        self.assertEqual(kw_translate.get("timeout"), 15.0)
+        self.assertEqual(kw_gabungan.get("timeout"), 60.0)
 
 
 class TestAudioError(unittest.TestCase):

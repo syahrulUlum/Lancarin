@@ -25,19 +25,21 @@ def _parse(raw: str, *labels: str) -> dict[str, str]:
 class Brain:
     def __init__(self, cfg: dict, token: str):
         self.cfg = cfg
-        # timeout pendek + retry terbatas: default OpenAI (600 dtk x3) membuat
-        # satu panggilan macet membekukan overlay tanpa kabar.
+        # timeout per panggilan di chat(): default OpenAI (600 dtk x3) membuat
+        # satu panggilan macet membekukan overlay tanpa kabar. Terukur di mesin
+        # ini: ping 2-4 dtk, panggilan gabungan pernah >20 dtk.
         self.client = OpenAI(api_key=token, base_url=cfg["base_url"],
-                             timeout=20.0, max_retries=1)
+                             timeout=60.0, max_retries=1)
         self.model = cfg["model"]
 
-    def chat(self, system: str, user: str) -> str:
+    def chat(self, system: str, user: str, timeout: float = 60.0) -> str:
         # Tanpa max_tokens: pada Muse Spark batas kecil dimakan proses
         # penalaran model dan content akhir kembali kosong.
         r = self.client.chat.completions.create(
             model=self.model,
             messages=[{"role": "system", "content": system},
                       {"role": "user", "content": user}],
+            timeout=timeout,
         )
         return (r.choices[0].message.content or "").strip()
 
@@ -48,7 +50,7 @@ class Brain:
             f"You are a precise live interpreter. Translate from {src} to {dst}. "
             "The text may be an unfinished sentence fragment; translate what is there. "
             "Output ONLY the translation, no quotes, no notes.",
-            text,
+            text, timeout=15.0,
         )
 
     def translate_and_suggest(self, text: str, context_desc: str, history: str,

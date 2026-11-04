@@ -30,6 +30,18 @@ Catatan: mode privat tidak meneruskan audio ke aplikasi call; mute mic
 Zoom/Meet tetap dilakukan pengguna. Fallback STT lokal dan adapter
 macOS/Linux mengikuti [rencana](docs/rencana.md).
 
+## Hasil uji di mesin pengembangan (4 Nov 2026)
+
+- Tes Koneksi lolos; panggilan gabungan terjemahan+saran 5–10 detik
+  (model `muse-spark-1.3-contributor`). `muse-wonder-1.0` terukur lebih
+  cepat (±5 detik) — pilih di Pengaturan bila latensi lebih penting.
+- STT asli (ucapan TTS → loopback → WebSocket): transkrip parsial mengalir
+  tiap ±0,3 detik, final tepat saat ucapan selesai.
+- Aplikasi diam: ±123 MB RAM. Skenario interview 6 pertanyaan: saran
+  nyambung dengan konteks dan riwayat.
+- Belum teruji: installer di mesin bersih, sesi 60 menit, mode privat
+  dengan perangkat kedua.
+
 ## Kemas installer (Windows)
 
 ```powershell
