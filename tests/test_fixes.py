@@ -434,7 +434,8 @@ class TestEnglishAndSettings(unittest.TestCase):
     def test_ui_utama_bahasa_inggris(self):
         win = appmod.MainWindow()
         self.assertEqual(win.start_btn.text(), "▶ Start Session")
-        self.assertEqual(win.stop_btn.text(), "■ End & Summarize")
+        self.assertEqual(win.stop_btn.text(), "■ End and Summarize")
+        self.assertNotIn("&", win.stop_btn.text(), "& di Qt membuat garis bawah mnemonic")
         self.assertTrue(win.session_btn.text().startswith("Session"))
         self.assertNotIn("Mulai", win.start_btn.text())
 
@@ -477,6 +478,41 @@ class TestEnglishAndSettings(unittest.TestCase):
         self.assertTrue((aset / "lancarin.ico").exists())
         win = appmod.MainWindow()
         self.assertFalse(win.windowIcon().isNull(), "ikon jendela harus logo Lancarin")
+
+
+class TestCompactAndState(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QApplication.instance() or QApplication([])
+
+    def test_jendela_ramping_di_bawah_setengah_layar(self):
+        win = appmod.MainWindow()
+        self.assertLessEqual(win.width(), 820, "jendela bawaan harus ramping (<=820px, <50% layar Full HD)")
+        self.assertLessEqual(win.height(), 620)
+        self.assertLessEqual(win.minimumWidth(), 680)
+
+    def test_state_tombol_dan_mode_jelas(self):
+        win = appmod.MainWindow()
+        self.assertTrue(win.start_btn.isEnabled())
+        self.assertFalse(win.stop_btn.isEnabled())
+        self.assertIn("Not started", win.session_state.text())
+        win.mode_conversation.setChecked(True)
+        win.update_mode_label()
+        self.assertIn("Conversation", win.session_state.text())
+        win._set_session_state("live")
+        self.assertFalse(win.start_btn.isEnabled())
+        self.assertIn("Running", win.start_btn.text())
+        self.assertTrue(win.stop_btn.isEnabled())
+        self.assertIn("LIVE", win.session_state.text())
+        win.mode_translate.setChecked(True)
+        win.update_mode_label()
+        self.assertIn("Translation only", win.session_state.text())
+        win._set_session_state("ending")
+        self.assertFalse(win.start_btn.isEnabled())
+        self.assertFalse(win.stop_btn.isEnabled())
+        win._set_session_state("idle")
+        self.assertTrue(win.start_btn.isEnabled())
+        self.assertEqual(win.start_btn.text(), "▶ Start Session")
 
 
 if __name__ == "__main__":

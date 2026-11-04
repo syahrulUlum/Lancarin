@@ -108,7 +108,7 @@ def test_connection(cfg: dict, token: str) -> list[tuple[str, bool, str]]:
         return [("Token", False, "Token is empty - add your Meta token in Settings first.")]
     steps: list[tuple[str, bool, str]] = []
     targets = [("Translation model", cfg.get("translate_model") or cfg["model"]),
-               ("Suggestions & summary model", cfg["model"])]
+               ("Suggestions and summary model", cfg["model"])]
     seen = set()
     for label, model in targets:
         if model in seen:

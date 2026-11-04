@@ -22,29 +22,29 @@ from PySide6.QtWidgets import (
 
 QSS = """
 QMainWindow, QDialog { background: #0f141b; }
-QLabel { color: #dbe4ee; font-size: 13px; }
-QLabel#stepTitle { color: #ffffff; font-size: 15px; font-weight: 600; }
-QLabel#hint { color: #8494a7; font-size: 12px; }
+QLabel { color: #dbe4ee; font-size: 12px; }
+QLabel#stepTitle { color: #ffffff; font-size: 14px; font-weight: 600; }
+QLabel#hint { color: #8494a7; font-size: 11px; }
 QFrame#card { background: #171f2a; border: 1px solid #263242; border-radius: 10px; }
 QLineEdit, QPlainTextEdit, QComboBox, QTextEdit {
     background: #101820; color: #e8eef4; border: 1px solid #2b3a4d;
-    border-radius: 8px; padding: 7px 9px; font-size: 13px;
+    border-radius: 7px; padding: 5px 8px; font-size: 12px;
 }
-QComboBox::drop-down { border: none; width: 22px; }
-QRadioButton { color: #dbe4ee; font-size: 13px; spacing: 6px; }
+QComboBox::drop-down { border: none; width: 20px; }
+QRadioButton { color: #dbe4ee; font-size: 12px; spacing: 5px; }
 QPushButton {
     background: #223146; color: #e8eef4; border: 1px solid #31445e;
-    border-radius: 8px; padding: 8px 14px; font-size: 13px;
+    border-radius: 7px; padding: 5px 10px; font-size: 12px;
 }
 QPushButton:hover { background: #2a3d59; }
 QPushButton#primary {
     background: #0d9488; border-color: #0d9488; color: #ffffff;
-    font-size: 17px; font-weight: 700; padding: 14px;
+    font-size: 14px; font-weight: 700; padding: 9px;
 }
 QPushButton#primary:hover { background: #0fae9f; }
 QPushButton#danger {
     background: #b91c1c; border-color: #b91c1c; color: #ffffff;
-    font-size: 15px; font-weight: 700; padding: 12px;
+    font-size: 13px; font-weight: 700; padding: 8px;
 }
 QPushButton:disabled { background: #1a2432; color: #5c6d80; border-color: #223146; }
 QPushButton#privateBtn:checked { background: #92400e; border-color: #d97706; color: #fff7ed; }
@@ -125,7 +125,7 @@ class SettingsDialog(QDialog):
         lay.addWidget(self.token_edit)
         models = QHBoxLayout()
         left = QVBoxLayout(); left.addWidget(QLabel("Translation model:")); left.addWidget(self.translate_model_box)
-        right = QVBoxLayout(); right.addWidget(QLabel("Suggestions & summary:")); right.addWidget(self.model_box)
+        right = QVBoxLayout(); right.addWidget(QLabel("Suggestions and summary:")); right.addWidget(self.model_box)
         models.addLayout(left, 1); models.addLayout(right, 1)
         lay.addLayout(models)
         hint = QLabel("Translation runs live, so a fast model matters most there (muse-wonder-1.0 measured fastest). Suggestions and summaries benefit from a stronger reasoning model.")
@@ -187,8 +187,8 @@ def _card(title: str, hint: str) -> tuple[QFrame, QVBoxLayout]:
     frame = QFrame()
     frame.setObjectName("card")
     lay = QVBoxLayout(frame)
-    lay.setContentsMargins(14, 12, 14, 12)
-    lay.setSpacing(8)
+    lay.setContentsMargins(10, 9, 10, 9)
+    lay.setSpacing(6)
     t = QLabel(title)
     t.setObjectName("stepTitle")
     lay.addWidget(t)
@@ -228,7 +228,7 @@ class MainWindow(QMainWindow):
         self._interim_snapshot = ""
 
         header = QLabel("Lancarin")
-        header.setStyleSheet("color:#ffffff;font-size:22px;font-weight:700;")
+        header.setStyleSheet("color:#ffffff;font-size:18px;font-weight:700;")
         _tok = config.get_token()
         _awal = (f"Token saved ({config.token_hint(_tok)}) - ready to start" if _tok
                  else "No token yet - open Settings & Test Connection")
@@ -285,7 +285,7 @@ class MainWindow(QMainWindow):
         self.start_btn = QPushButton("▶ Start Session")
         self.start_btn.setObjectName("primary")
         self.start_btn.clicked.connect(self.start_session)
-        self.stop_btn = QPushButton("■ End & Summarize")
+        self.stop_btn = QPushButton("■ End and Summarize")
         self.stop_btn.setObjectName("danger")
         self.stop_btn.clicked.connect(self.end_session)
         self.stop_btn.setEnabled(False)
@@ -295,6 +295,12 @@ class MainWindow(QMainWindow):
         self.private_btn.clicked.connect(self.toggle_private)
         export_btn = QPushButton("Export Transcript (.md)")
         export_btn.clicked.connect(self.export_md)
+        self._sess_state = "idle"
+        self.session_state = QLabel("")
+        self.session_state.setStyleSheet(
+            "color:#cbd5e1;background:#1c2939;border:1px solid #2b3f58;"
+            "border-radius:9px;padding:4px 10px;font-size:12px;font-weight:600;")
+        self.update_mode_label()
         action_row = QHBoxLayout()
         action_row.addWidget(self.start_btn, 2)
         action_row.addWidget(self.stop_btn, 2)
@@ -382,9 +388,10 @@ class MainWindow(QMainWindow):
         self.settings_panel.hide()
 
         root = QVBoxLayout()
-        root.setContentsMargins(16, 14, 16, 14)
-        root.setSpacing(12)
+        root.setContentsMargins(10, 9, 10, 9)
+        root.setSpacing(8)
         root.addLayout(head_row)
+        root.addWidget(self.session_state)
         root.addLayout(action_row)
         root.addLayout(util_row)
         root.addWidget(self.settings_panel)
@@ -393,8 +400,8 @@ class MainWindow(QMainWindow):
         central = QWidget(); central.setLayout(root)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(central)
         self.setCentralWidget(scroll)
-        self.resize(1080, 880)
-        self.setMinimumSize(860, 640)
+        self.resize(800, 600)
+        self.setMinimumSize(620, 460)
         self._wire()
 
     # ---------- kabel sinyal & status ----------
@@ -409,12 +416,41 @@ class MainWindow(QMainWindow):
         self.bridge.status.connect(self.set_status)
         self.bridge.status.connect(self._busy_watch)
         QShortcut(QKeySequence("F9"), self).activated.connect(self.private_btn.click)
+        self.mode_conversation.toggled.connect(lambda _on: self.update_mode_label())
+        self.mode_translate.toggled.connect(lambda _on: self.update_mode_label())
         self._meter_timer = QTimer(self)
         self._meter_timer.timeout.connect(self.tick_levels)
         self._meter_timer.start(200)
         self._interim_timer = QTimer(self)
         self._interim_timer.timeout.connect(self.maybe_interim)
         self._interim_timer.start(300)
+
+    def update_mode_label(self):
+        mode = ("Conversation (translation + reply suggestions)"
+                if self.mode_conversation.isChecked() else "Translation only")
+        prefix = {"idle": "○ Not started", "live": "● LIVE",
+                  "ending": "⏳ Ending - building summary"}.get(self._sess_state, "○ Not started")
+        color = "#5eead4" if self._sess_state == "live" else "#cbd5e1"
+        self.session_state.setStyleSheet(
+            f"color:{color};background:#1c2939;border:1px solid #2b3f58;"
+            "border-radius:9px;padding:4px 10px;font-size:12px;font-weight:600;")
+        self.session_state.setText(f"{prefix}  ·  Mode: {mode}")
+
+    def _set_session_state(self, state: str):
+        self._sess_state = state
+        if state == "live":
+            self.start_btn.setEnabled(False)
+            self.start_btn.setText("● Session Running")
+            self.stop_btn.setEnabled(True)
+        elif state == "ending":
+            self.start_btn.setEnabled(False)
+            self.start_btn.setText("⏳ Ending…")
+            self.stop_btn.setEnabled(False)
+        else:
+            self.start_btn.setEnabled(True)
+            self.start_btn.setText("▶ Start Session")
+            self.stop_btn.setEnabled(False)
+        self.update_mode_label()
 
     def toggle_settings_panel(self):
         show = self.session_btn.isChecked()
@@ -455,7 +491,7 @@ class MainWindow(QMainWindow):
     def _busy_watch(self, text: str):
         if text.startswith("Summary failed"):
             self.set_busy(False)
-            self.start_btn.setEnabled(True)
+            self._set_session_state("idle")
 
     def set_status(self, text: str):
         live = "live" in text.lower() or "PRIVATE" in text
@@ -582,8 +618,7 @@ class MainWindow(QMainWindow):
         self._active = True
         self._partial = ""
         self._interim_snapshot = ""
-        self.start_btn.setEnabled(False)
-        self.stop_btn.setEnabled(True)
+        self._set_session_state("live")
         self.set_busy(False)
         self.set_status(f"Session live - translating {opp} → {mine}")
 
@@ -690,15 +725,14 @@ class MainWindow(QMainWindow):
         # Kabari dulu, baru bekerja: menghentikan stream bisa makan detik dan
         # tanpa ini aplikasi terlihat membeku tanpa penjelasan.
         self.set_busy(True, "Ending session - stopping audio, then building your summary…")
-        self.stop_btn.setEnabled(False)
-        self.start_btn.setEnabled(False)
+        self._set_session_state("ending")
         self._panel_processing("⏳ Ending session…")
         QApplication.processEvents()
         self.stop_streams()
         self._end_gen = self._gen
         if not self.brain or not self.session.turns:
             self.set_busy(False)
-            self.start_btn.setEnabled(True)
+            self._set_session_state("idle")
             self.set_status("Session ended - no conversation was recorded yet")
             return
         self.set_busy(True, "Ending session - building summary (usually 10-20 seconds)…")
@@ -720,7 +754,7 @@ class MainWindow(QMainWindow):
         if getattr(self, "_end_gen", self._gen) != self._gen:
             return  # ringkasan sesi lama, sesi baru sudah berjalan
         self.set_busy(False)
-        self.start_btn.setEnabled(True)
+        self._set_session_state("idle")
         if not summary.strip():
             self.set_status("The AI returned an empty summary - your transcript can still be exported")
             QMessageBox.warning(self, "Session Summary",
