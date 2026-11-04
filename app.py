@@ -3,6 +3,7 @@ import html
 import sys
 import threading
 import time
+from pathlib import Path
 
 # stt kebal urutan impor (lihat stt.py); impor awal di sini hanya kejelasan.
 import audio
@@ -12,9 +13,9 @@ from session import Session
 from stt import RealtimeSTT
 
 from PySide6.QtCore import Qt, QTimer, Signal, QObject
-from PySide6.QtGui import QShortcut, QKeySequence
+from PySide6.QtGui import QIcon, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout,
+    QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit,
     QProgressBar, QPushButton, QRadioButton, QScrollArea, QTextEdit, QVBoxLayout, QWidget,
 )
@@ -81,13 +82,13 @@ class SettingsDialog(QDialog):
         self.test_ok = False
         self._tested_for = ""
         self._test_ran = False
-        self.setWindowTitle("Pengaturan Lancarin")
+        self.setWindowTitle("Lancarin Settings")
         self.setStyleSheet(QSS)
-        self.resize(520, 430)
+        self.resize(480, 420)
         self.token_edit = QLineEdit()
         self.token_edit.setEchoMode(QLineEdit.EchoMode.Password)
         token = config.get_token()
-        self.token_edit.setPlaceholderText(config.token_hint(token) + " — tempel token baru untuk mengganti")
+        self.token_edit.setPlaceholderText(config.token_hint(token) + " - paste a new token to replace it")
         self.model_box = QComboBox()
         self.model_box.addItems(config.MODELS)
         self.model_box.setCurrentText(cfg["model"])
@@ -95,30 +96,48 @@ class SettingsDialog(QDialog):
         self.translate_model_box.addItems(config.MODELS)
         self.translate_model_box.setCurrentText(cfg.get("translate_model") or config.DEFAULTS["translate_model"])
         self.base_edit = QLineEdit(cfg["base_url"])
+        self.advanced_check = QCheckBox("Advanced")
+        self.advanced_check.toggled.connect(lambda on: self.advanced_box.setVisible(on))
+        self.advanced_box = QWidget()
+        adv_lay = QVBoxLayout(self.advanced_box)
+        adv_lay.setContentsMargins(0, 0, 0, 0)
+        adv_lay.addWidget(QLabel("Base URL (leave as the Meta default unless you use a proxy):"))
+        adv_lay.addWidget(self.base_edit)
+        self.advanced_box.hide()
         self.result = QTextEdit(readOnly=True)
-        self.result.setPlaceholderText("Hasil Tes Koneksi muncul di sini.")
+        self.result.setPlaceholderText("Connection test results appear here. Each selected model is tested separately.")
+        self.result.setMaximumHeight(120)
         self.result_ready.connect(self.result.setPlainText)
-        test_btn = QPushButton("Tes Koneksi")
+        test_btn = QPushButton("Test Connection")
         test_btn.clicked.connect(self.run_test)
-        save_btn = QPushButton("Simpan")
+        save_btn = QPushButton("Save")
         save_btn.setObjectName("primary")
         save_btn.clicked.connect(self.save)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
         self._save_btn = save_btn
         self.result_ready.connect(lambda _t: self._save_btn.setEnabled(True))
         lay = QVBoxLayout(self)
-        title = QLabel("Token & Model Meta"); title.setObjectName("stepTitle")
+        lay.setSpacing(8)
+        title = QLabel("Settings"); title.setObjectName("stepTitle")
         lay.addWidget(title)
-        lay.addWidget(QLabel("Token Meta Model API (tersimpan aman di brankas OS, dapatkan di dev.meta.ai):"))
+        lay.addWidget(QLabel("Meta Model API token (stored securely in your OS keychain; get one at dev.meta.ai):"))
         lay.addWidget(self.token_edit)
-        lay.addWidget(QLabel("Model saran & ringkasan (dipakai untuk saran jawaban dan ringkasan sesi):"))
-        lay.addWidget(self.model_box)
-        lay.addWidget(QLabel("Model terjemahan (dipakai untuk semua terjemahan langsung; muse-wonder-1.0 terukur tercepat ±2,5 detik):"))
-        lay.addWidget(self.translate_model_box)
-        lay.addWidget(QLabel("Base URL (lanjutan, biarkan default Meta):"))
-        lay.addWidget(self.base_edit)
+        models = QHBoxLayout()
+        left = QVBoxLayout(); left.addWidget(QLabel("Translation model:")); left.addWidget(self.translate_model_box)
+        right = QVBoxLayout(); right.addWidget(QLabel("Suggestions & summary:")); right.addWidget(self.model_box)
+        models.addLayout(left, 1); models.addLayout(right, 1)
+        lay.addLayout(models)
+        hint = QLabel("Translation runs live, so a fast model matters most there (muse-wonder-1.0 measured fastest). Suggestions and summaries benefit from a stronger reasoning model.")
+        hint.setObjectName("hint"); hint.setWordWrap(True)
+        lay.addWidget(hint)
+        lay.addWidget(self.advanced_check)
+        lay.addWidget(self.advanced_box)
         lay.addWidget(test_btn)
         lay.addWidget(self.result)
-        lay.addWidget(save_btn)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1); btn_row.addWidget(cancel_btn); btn_row.addWidget(save_btn)
+        lay.addLayout(btn_row)
 
     def current_cfg(self):
         cfg = dict(self.cfg)
@@ -128,8 +147,8 @@ class SettingsDialog(QDialog):
         return cfg
 
     def run_test(self):
-        self._save_btn.setEnabled(False)  # jangan simpan di tengah tes berjalan
-        self.result.setPlainText("Menguji…")
+        self._save_btn.setEnabled(False)  # do not save while the test is running
+        self.result.setPlainText("Testing each model and your audio devices…")
         token = self.token_edit.text().strip() or config.get_token()
         cfg = self.current_cfg()
 
@@ -144,9 +163,9 @@ class SettingsDialog(QDialog):
             try:
                 loop_i, mic_i, _ = audio.list_devices()
                 ok = loop_i is not None and mic_i is not None
-                lines.append(("✓ " if ok else "✗ ") + f"Audio: loopback={loop_i}, mic={mic_i}")
+                lines.append(("✓ " if ok else "✗ ") + f"Audio devices: system audio (other party)={loop_i}, microphone (you)={mic_i}")
             except Exception as exc:
-                lines.append("✗ Audio: " + str(exc)[:120])
+                lines.append("✗ Audio devices: " + str(exc)[:120])
             self.result_ready.emit("\n".join(lines))
 
         threading.Thread(target=work, daemon=True).start()
@@ -184,8 +203,14 @@ def _card(title: str, hint: str) -> tuple[QFrame, QVBoxLayout]:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Lancarin — Asisten Percakapan")
+        self.setWindowTitle("Lancarin - Conversation Assistant")
         self.setStyleSheet(QSS)
+        _base = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+        logo = _base / "assets" / "lancarin.png"
+        if not logo.exists():
+            logo = Path(__file__).parent / "assets" / "lancarin.png"
+        if logo.exists():
+            self.setWindowIcon(QIcon(str(logo)))
         self.bridge = Bridge()
         self.cfg = config.load()
         self.session = Session()
@@ -194,9 +219,8 @@ class MainWindow(QMainWindow):
         self.stts = []
         self._panel_font = 22
         self.private_mode = False
-        self._gen = 0  # nomor generasi sesi: hasil thread sesi lama dibuang
+        self._gen = 0  # session generation: stale thread results are dropped
         self._keywords = []
-        self._summary_dialog = None
         self._active = False
         self._partial = ""
         self._interim_busy = False
@@ -206,15 +230,15 @@ class MainWindow(QMainWindow):
         header = QLabel("Lancarin")
         header.setStyleSheet("color:#ffffff;font-size:22px;font-weight:700;")
         _tok = config.get_token()
-        _awal = (f"Token sudah terisi ({config.token_hint(_tok)}) — siap dimulai" if _tok
-                 else "Token belum diisi — klik Pengaturan & Tes Koneksi")
+        _awal = (f"Token saved ({config.token_hint(_tok)}) - ready to start" if _tok
+                 else "No token yet - open Settings & Test Connection")
         self.status_pill = QLabel("○ " + _awal)
         self.status_pill.setStyleSheet(
             "color:#cbd5e1;background:#1c2939;border:1px solid #2b3f58;"
             "border-radius:12px;padding:5px 12px;font-size:12px;")
-        settings_btn = QPushButton("Pengaturan & Tes Koneksi")
+        settings_btn = QPushButton("Settings")
         settings_btn.clicked.connect(self.open_settings)
-        self.session_btn = QPushButton("⚙ Pengaturan Sesi ▾")
+        self.session_btn = QPushButton("Session ▾")
         self.session_btn.setCheckable(True)
         self.session_btn.clicked.connect(self.toggle_settings_panel)
         head_row = QHBoxLayout()
@@ -226,60 +250,50 @@ class MainWindow(QMainWindow):
 
         self.context_edit = QPlainTextEdit()
         self.context_edit.setPlaceholderText(
-            "Contoh: Interview posisi marketing, saya kandidatnya. Boleh dikosongkan.")
-        self.context_edit.setMaximumHeight(64)
+            "Context helps the AI suggest relevant replies. Example: Marketing job interview, I am the candidate. Optional.")
+        self.context_edit.setMaximumHeight(44)
         self.keywords_edit = QLineEdit()
-        self.keywords_edit.setPlaceholderText("Nama orang/perusahaan agar dikenali benar (opsional, pisahkan koma)")
-        card1, lay1 = _card("1 · Siapkan sesi", "Deskripsi konteks membantu AI memberi saran yang nyambung.")
-        lay1.addWidget(self.context_edit)
-        lay1.addWidget(self.keywords_edit)
-
+        self.keywords_edit.setPlaceholderText("Names or terms to recognize correctly (optional, comma-separated)")
         self.opp_lang = QComboBox(); self.opp_lang.addItems(config.LANGUAGES)
         self.opp_lang.setCurrentText(self.cfg["opponent_lang"])
         self.my_lang = QComboBox(); self.my_lang.addItems(config.LANGUAGES)
         self.my_lang.setCurrentText(self.cfg["my_lang"])
-        self.mode_conversation = QRadioButton("Percakapan (terjemahan + saran jawaban)")
-        self.mode_translate = QRadioButton("Terjemahan saja")
+        self.mode_conversation = QRadioButton("Conversation (translation + reply suggestions)")
+        self.mode_translate = QRadioButton("Translation only")
         if self.cfg["mode"] == "conversation":
             self.mode_conversation.setChecked(True)
         else:
             self.mode_translate.setChecked(True)
-        card2, lay2 = _card("2 · Bahasa & mode", "")
+        card1, lay1 = _card("Session setup", "")
         lang_row = QHBoxLayout()
-        lang_row.addWidget(QLabel("Bahasa lawan:"))
+        lang_row.addWidget(QLabel("Other party:"))
         lang_row.addWidget(self.opp_lang, 1)
-        lang_row.addWidget(QLabel("Bahasa saya:"))
+        swap_btn = QPushButton("⇄ Swap")
+        swap_btn.clicked.connect(self.swap_languages)
+        lang_row.addWidget(swap_btn)
+        lang_row.addWidget(QLabel("Me:"))
         lang_row.addWidget(self.my_lang, 1)
-        lay2.addLayout(lang_row)
-        preset_row = QHBoxLayout()
-        preset_en_id = QPushButton("Preset: Inggris → Indonesia")
-        preset_en_id.clicked.connect(lambda: (self.opp_lang.setCurrentText("English"),
-                                              self.my_lang.setCurrentText("Indonesian")))
-        preset_id_en = QPushButton("Preset: Indonesia → Inggris")
-        preset_id_en.clicked.connect(lambda: (self.opp_lang.setCurrentText("Indonesian"),
-                                              self.my_lang.setCurrentText("English")))
-        preset_row.addWidget(preset_en_id)
-        preset_row.addWidget(preset_id_en)
-        preset_row.addStretch(1)
-        lay2.addLayout(preset_row)
+        lay1.addLayout(lang_row)
+        lay1.addWidget(self.context_edit)
+        lay1.addWidget(self.keywords_edit)
         mode_row = QHBoxLayout()
         mode_row.addWidget(self.mode_conversation)
         mode_row.addWidget(self.mode_translate)
         mode_row.addStretch(1)
-        lay2.addLayout(mode_row)
+        lay1.addLayout(mode_row)
 
-        self.start_btn = QPushButton("▶  Mulai Sesi")
+        self.start_btn = QPushButton("▶ Start Session")
         self.start_btn.setObjectName("primary")
         self.start_btn.clicked.connect(self.start_session)
-        self.stop_btn = QPushButton("■  Akhiri & Buat Ringkasan")
+        self.stop_btn = QPushButton("■ End & Summarize")
         self.stop_btn.setObjectName("danger")
         self.stop_btn.clicked.connect(self.end_session)
         self.stop_btn.setEnabled(False)
-        self.private_btn = QPushButton("Cek Ucapan Saya saja (F9)")
+        self.private_btn = QPushButton("Private Speech Check (F9)")
         self.private_btn.setObjectName("privateBtn")
         self.private_btn.setCheckable(True)
         self.private_btn.clicked.connect(self.toggle_private)
-        export_btn = QPushButton("Ekspor transkrip .md")
+        export_btn = QPushButton("Export Transcript (.md)")
         export_btn.clicked.connect(self.export_md)
         action_row = QHBoxLayout()
         action_row.addWidget(self.start_btn, 2)
@@ -292,13 +306,13 @@ class MainWindow(QMainWindow):
         self.level_loop = QProgressBar(maximum=100)
         self.level_mic = QProgressBar(maximum=100)
         self.log = QTextEdit(readOnly=True)
-        self.log.setPlaceholderText("Transkrip sesi tampil di sini…")
-        self.log.document().setMaximumBlockCount(500)  # sesi panjang tidak makin lambat
-        card3, lay3 = _card("Percakapan langsung", "Bar hijau = suara tertangkap. Panel di bawah menampilkan ucapan lawan, terjemahan besar, dan saran jawaban — semua di dalam aplikasi.")
+        self.log.setPlaceholderText("The session transcript appears here…")
+        self.log.document().setMaximumBlockCount(500)  # long sessions stay responsive
+        card3, lay3 = _card("Live conversation", "Green bars mean audio is being captured. The panel shows what the other party says, a large translation, and a suggested reply.")
         meter_row = QHBoxLayout()
-        meter_row.addWidget(QLabel("Lawan:"))
+        meter_row.addWidget(QLabel("Other:"))
         meter_row.addWidget(self.level_loop, 1)
-        meter_row.addWidget(QLabel("Kamu:"))
+        meter_row.addWidget(QLabel("You:"))
         meter_row.addWidget(self.level_mic, 1)
         lay3.addLayout(meter_row)
         # Panel langsung pengganti overlay: lencana proses, saran, asli, terjemahan.
@@ -319,9 +333,11 @@ class MainWindow(QMainWindow):
             lab.setWordWrap(True)
             lab.hide()
         self._apply_panel_font()
-        self.btn_font_smaller = QPushButton("A− Kecilkan")
+        self.btn_font_smaller = QPushButton("A−")
+        self.btn_font_smaller.setToolTip("Smaller translation text")
         self.btn_font_smaller.clicked.connect(lambda: self._panel_zoom(-1))
-        self.btn_font_bigger = QPushButton("A+ Besarkan")
+        self.btn_font_bigger = QPushButton("A+")
+        self.btn_font_bigger.setToolTip("Larger translation text")
         self.btn_font_bigger.clicked.connect(lambda: self._panel_zoom(1))
         panel_head = QHBoxLayout()
         panel_head.addWidget(self.panel_badge)
@@ -332,10 +348,29 @@ class MainWindow(QMainWindow):
         lay3.addWidget(self.panel_suggested)
         lay3.addWidget(self.panel_original)
         lay3.addWidget(self.panel_translated)
-        self.busy_bar = QProgressBar(minimum=0, maximum=0)  # berputar selama proses AI
+        self.busy_bar = QProgressBar(minimum=0, maximum=0)  # spins while the AI works
         self.busy_bar.hide()
         lay3.addWidget(self.busy_bar)
         lay3.addWidget(self.log, 1)
+
+        # Session summary as an in-app card (replaces the old popup).
+        self.summary_card, sum_lay = _card("Session Summary", "")
+        self.summary_text = QTextEdit(readOnly=True)
+        self.summary_text.setMaximumHeight(260)
+        sum_lay.addWidget(self.summary_text)
+        sum_btns = QHBoxLayout()
+        copy_btn = QPushButton("Copy Summary")
+        copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(self.summary_text.toPlainText()))
+        export2_btn = QPushButton("Export Transcript (.md)")
+        export2_btn.clicked.connect(self.export_md)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.summary_card.hide)
+        sum_btns.addWidget(copy_btn)
+        sum_btns.addWidget(export2_btn)
+        sum_btns.addStretch(1)
+        sum_btns.addWidget(close_btn)
+        sum_lay.addLayout(sum_btns)
+        self.summary_card.hide()
 
         # Menu pengaturan sesi: konteks + bahasa + mode, terlipat bawaan agar
         # kotak percakapan mendapat ruang penuh.
@@ -344,7 +379,6 @@ class MainWindow(QMainWindow):
         sp_lay.setContentsMargins(0, 0, 0, 0)
         sp_lay.setSpacing(12)
         sp_lay.addWidget(card1)
-        sp_lay.addWidget(card2)
         self.settings_panel.hide()
 
         root = QVBoxLayout()
@@ -355,6 +389,7 @@ class MainWindow(QMainWindow):
         root.addLayout(util_row)
         root.addWidget(self.settings_panel)
         root.addWidget(card3, 1)
+        root.addWidget(self.summary_card)
         central = QWidget(); central.setLayout(root)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(central)
         self.setCentralWidget(scroll)
@@ -382,9 +417,14 @@ class MainWindow(QMainWindow):
         self._interim_timer.start(300)
 
     def toggle_settings_panel(self):
-        tampil = self.session_btn.isChecked()
-        self.settings_panel.setVisible(tampil)
-        self.session_btn.setText("⚙ Pengaturan Sesi ▴" if tampil else "⚙ Pengaturan Sesi ▾")
+        show = self.session_btn.isChecked()
+        self.settings_panel.setVisible(show)
+        self.session_btn.setText("Session ▴" if show else "Session ▾")
+
+    def swap_languages(self):
+        opp, mine = self.opp_lang.currentText(), self.my_lang.currentText()
+        self.opp_lang.setCurrentText(mine)
+        self.my_lang.setCurrentText(opp)
 
     def _apply_panel_font(self):
         self.panel_translated.setStyleSheet(
@@ -413,12 +453,12 @@ class MainWindow(QMainWindow):
             self.set_status(text)
 
     def _busy_watch(self, text: str):
-        if text.startswith("Ringkasan gagal"):
+        if text.startswith("Summary failed"):
             self.set_busy(False)
             self.start_btn.setEnabled(True)
 
     def set_status(self, text: str):
-        live = "berjalan" in text or "PRIVAT" in text
+        live = "live" in text.lower() or "PRIVATE" in text
         color = "#5eead4" if live else "#cbd5e1"
         bg = "#123b36" if live else "#1c2939"
         self.status_pill.setStyleSheet(
@@ -437,17 +477,17 @@ class MainWindow(QMainWindow):
             self.cfg = config.load()
             tok = config.get_token()
             self.set_status(
-                f"Pengaturan tersimpan — token terisi ({config.token_hint(tok)}), siap dimulai"
-                if tok else "Pengaturan tersimpan — token masih kosong")
+                f"Settings saved - token saved ({config.token_hint(tok)}), ready to start"
+                if tok else "Settings saved - token is still empty")
 
     def toggle_private(self):
         self.private_mode = self.private_btn.isChecked()
         if self.private_mode and self._active:
-            teks = "Mode PRIVAT berjalan: ucapanmu hanya diterjemahkan di sini. Pastikan mic Zoom/Meet mute."
+            teks = "PRIVATE mode is on: your speech is translated only here. Keep your Zoom/Meet mic muted."
         elif self.private_mode:
-            teks = "Mode privat siap — berlaku saat sesi berjalan. Pastikan mic Zoom/Meet mute."
+            teks = "Private check ready - it applies while a session is live. Keep your Zoom/Meet mic muted."
         else:
-            teks = "Siap — mode privat mati"
+            teks = "Ready - private check off"
         self.set_status(teks)
 
     # ---------- terjemahan interim (sambil lawan masih bicara) ----------
@@ -492,23 +532,23 @@ class MainWindow(QMainWindow):
     def start_session(self):
         token = config.get_token()
         if not token:
-            QMessageBox.warning(self, "Lancarin", "Token Meta masih kosong. Klik Pengaturan & Tes Koneksi dulu.")
+            QMessageBox.warning(self, "Lancarin", "Your Meta token is empty. Open Settings first.")
             return
         if self.opp_lang.currentText() == self.my_lang.currentText():
             QMessageBox.warning(self, "Lancarin",
-                                "Bahasa lawan dan Bahasa saya sama, jadi tidak ada yang "
-                                "diterjemahkan. Pilih pasangan berbeda atau pakai tombol Preset.")
+                                "Both languages are the same, so there is nothing to translate. "
+                                "Pick a different pair or use Swap.")
             return
         if not is_tested(self.cfg):
             QMessageBox.warning(self, "Lancarin",
-                                "Tes Koneksi belum lolos untuk model/base URL ini. "
-                                "Klik Pengaturan & Tes Koneksi, jalankan Tes Koneksi sampai ✓, lalu Simpan.")
+                                "The connection test has not passed for these model settings yet. "
+                                "Open Settings, run Test Connection until every line shows a checkmark, then Save.")
             return
         mode = "conversation" if self.mode_conversation.isChecked() else "translate"
         self.cfg.update({"opponent_lang": self.opp_lang.currentText(),
                          "my_lang": self.my_lang.currentText(), "mode": mode})
         config.save(self.cfg)
-        self.set_busy(True, "Memulai sesi — menghubungkan audio & transkripsi…")
+        self.set_busy(True, "Starting session - connecting audio & transcription…")
         QApplication.processEvents()
         self.brain = brain_mod.Brain(self.cfg, token)
         self.session = Session(self.context_edit.toPlainText().strip())
@@ -517,25 +557,25 @@ class MainWindow(QMainWindow):
         loop_i, mic_i, _ = audio.list_devices()
         if loop_i is None or mic_i is None:
             self.set_busy(False)
-            QMessageBox.warning(self, "Lancarin", f"Perangkat audio tidak lengkap: loopback={loop_i}, mic={mic_i}")
+            QMessageBox.warning(self, "Lancarin", f"Audio devices incomplete: system audio={loop_i}, microphone={mic_i}")
             return
         self._gen += 1
         self.captures = [
-            audio.Capture(loop_i, on_error=lambda e: self.bridge.status.emit("Audio lawan bermasalah: " + e)),
-            audio.Capture(mic_i, on_error=lambda e: self.bridge.status.emit("Audio mic bermasalah: " + e)),
+            audio.Capture(loop_i, on_error=lambda e: self.bridge.status.emit("System audio problem: " + e)),
+            audio.Capture(mic_i, on_error=lambda e: self.bridge.status.emit("Microphone problem: " + e)),
         ]
         for cap in self.captures:
             cap.start()
         opp, mine = self.cfg["opponent_lang"], self.cfg["my_lang"]
         self.stts = [
             RealtimeSTT(token, self.captures[0].frames, [opp, mine], keywords,
-                        lambda t: self.bridge.partial.emit("Lawan", t),
+                        lambda t: self.bridge.partial.emit("Other", t),
                         lambda t: self.bridge.opponent_final.emit(t),
-                        lambda e: self.bridge.status.emit("STT lawan bermasalah: " + e)),
+                        lambda e: self.bridge.status.emit("Other-party transcription problem: " + e)),
             RealtimeSTT(token, self.captures[1].frames, [mine, opp], keywords,
-                        lambda t: self.bridge.partial.emit("Saya", t),
+                        lambda t: self.bridge.partial.emit("You", t),
                         lambda t: self.bridge.mine_final.emit(t),
-                        lambda e: self.bridge.status.emit("STT kamu bermasalah: " + e)),
+                        lambda e: self.bridge.status.emit("Your transcription problem: " + e)),
         ]
         for s in self.stts:
             s.start()
@@ -545,14 +585,14 @@ class MainWindow(QMainWindow):
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self.set_busy(False)
-        self.set_status(f"Sesi berjalan — menerjemahkan {opp} → {mine} secara langsung")
+        self.set_status(f"Session live - translating {opp} → {mine}")
 
     def on_partial(self, who, text):
         if not self._active:
             return
-        if who == "Lawan" and text:
+        if who == "Other" and text:
             self._partial = text
-            self._panel_processing("● LAWAN BERBICARA…")
+            self._panel_processing("● OTHER PARTY SPEAKING…")
             self._panel_show(self.panel_original, text)
 
     def on_opponent(self, text):
@@ -562,14 +602,14 @@ class MainWindow(QMainWindow):
         self._interim_snapshot = ""
         self.panel_badge.hide()
         opp, mine = self.cfg["opponent_lang"], self.cfg["my_lang"]
-        turn = self.session.add("Lawan", text)
-        self.log.append(f"<b>Lawan:</b> {html.escape(text)}")
+        turn = self.session.add("Other", text)
+        self.log.append(f"<b>Other:</b> {html.escape(text)}")
         self._panel_show(self.panel_original, text)
         brain, session = self.brain, self.session
         gen = self._gen
         mode = self.cfg["mode"]
         history = session.history_text()
-        self._panel_processing("⏳ Menerjemahkan…")
+        self._panel_processing("⏳ Translating…")
 
         # Terjemahan dan saran jalan paralel: terjemahan (model cepat) tampil
         # duluan, saran menyusul. Dulu keduanya digabung satu panggilan
@@ -583,7 +623,7 @@ class MainWindow(QMainWindow):
                 self.bridge.translation.emit(text, translated)
             except Exception as exc:
                 if gen == self._gen:
-                    self.bridge.status.emit("AI bermasalah: " + str(exc)[:160])
+                    self.bridge.status.emit("AI problem: " + str(exc)[:160])
 
         threading.Thread(target=work_translate, daemon=True).start()
         if mode == "conversation":
@@ -591,18 +631,18 @@ class MainWindow(QMainWindow):
                 try:
                     saran = brain.suggest(session.context_desc, history, text, opp, mine, list(self._keywords))
                     if gen == self._gen and saran.strip():
-                        self.bridge.suggestion.emit("Saran jawab: " + saran.replace("\n", "   ·   "))
+                        self.bridge.suggestion.emit("Suggested reply: " + saran.replace("\n", "   ·   "))
                 except Exception as exc:
                     if gen == self._gen:
-                        self.bridge.status.emit("Saran bermasalah: " + str(exc)[:160])
+                        self.bridge.status.emit("Suggestion problem: " + str(exc)[:160])
 
             threading.Thread(target=work_suggest, daemon=True).start()
 
     def on_mine(self, text):
         if not self._active:
             return
-        self.session.add("Saya", text)
-        label = "Saya (privat): " if self.private_mode else "Saya: "
+        self.session.add("You", text)
+        label = "You (private): " if self.private_mode else "You: "
         self.log.append(f"<b>{label}</b> {html.escape(text)}")
         if self.private_mode and self.brain:
             brain, opp, mine = self.brain, self.cfg["opponent_lang"], self.cfg["my_lang"]
@@ -612,22 +652,22 @@ class MainWindow(QMainWindow):
                 try:
                     hasil = brain.translate(text, mine, opp)
                     if gen == self._gen:
-                        self.bridge.suggestion.emit(f"Ucapanmu dalam {opp}: " + hasil)
+                        self.bridge.suggestion.emit(f"Your speech in {opp}: " + hasil)
                 except Exception as exc:
                     if gen == self._gen:
-                        self.bridge.status.emit("AI bermasalah: " + str(exc)[:160])
+                        self.bridge.status.emit("AI problem: " + str(exc)[:160])
 
             threading.Thread(target=work, daemon=True).start()
 
     def on_translation(self, original, translated):
         if not translated.strip():
             self.panel_badge.hide()
-            self.set_status("Terjemahan kembali kosong dari AI — periksa model/token di Pengaturan")
-            self.log.append("<i>→ (kosong dari AI)</i>")
+            self.set_status("The AI returned an empty translation - check the model/token in Settings")
+            self.log.append("<i>→ (empty from AI)</i>")
             return
         self._panel_show(self.panel_translated, translated)
         if self.cfg["mode"] == "conversation":
-            self._panel_processing("⏳ Terjemahan tampil — menyusun saran…")
+            self._panel_processing("⏳ Translation shown - preparing a suggestion…")
         else:
             self.panel_badge.hide()
         self.log.append(f"<i>→ {html.escape(translated)}</i>")
@@ -649,19 +689,19 @@ class MainWindow(QMainWindow):
     def end_session(self):
         # Kabari dulu, baru bekerja: menghentikan stream bisa makan detik dan
         # tanpa ini aplikasi terlihat membeku tanpa penjelasan.
-        self.set_busy(True, "Mengakhiri sesi — menghentikan audio, lalu menyusun ringkasan…")
+        self.set_busy(True, "Ending session - stopping audio, then building your summary…")
         self.stop_btn.setEnabled(False)
         self.start_btn.setEnabled(False)
-        self._panel_processing("⏳ Mengakhiri sesi…")
+        self._panel_processing("⏳ Ending session…")
         QApplication.processEvents()
         self.stop_streams()
         self._end_gen = self._gen
         if not self.brain or not self.session.turns:
             self.set_busy(False)
             self.start_btn.setEnabled(True)
-            self.set_status("Sesi berakhir — belum ada percakapan terekam")
+            self.set_status("Session ended - no conversation was recorded yet")
             return
-        self.set_busy(True, "Mengakhiri sesi — menyusun ringkasan (biasanya belasan detik)…")
+        self.set_busy(True, "Ending session - building summary (usually 10-20 seconds)…")
         brain, session, mine = self.brain, self.session, self.cfg["my_lang"]
         end_gen = self._gen
 
@@ -672,7 +712,7 @@ class MainWindow(QMainWindow):
                     self.bridge.summary_ready.emit(summary)
             except Exception as exc:
                 if end_gen == self._gen:
-                    self.bridge.status.emit("Ringkasan gagal: " + str(exc)[:160])
+                    self.bridge.status.emit("Summary failed: " + str(exc)[:160])
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -682,35 +722,24 @@ class MainWindow(QMainWindow):
         self.set_busy(False)
         self.start_btn.setEnabled(True)
         if not summary.strip():
-            self.set_status("Ringkasan kembali kosong dari AI — transkrip tetap bisa diekspor")
-            QMessageBox.warning(self, "Ringkasan Sesi",
-                                "AI mengembalikan ringkasan kosong. Transkrip lengkap tetap "
-                                "tersimpan di sesi ini — gunakan Ekspor transkrip .md.")
+            self.set_status("The AI returned an empty summary - your transcript can still be exported")
+            QMessageBox.warning(self, "Session Summary",
+                                "The AI returned an empty summary. Your full transcript is still "
+                                "kept in this session - use Export Transcript (.md).")
             return
         self._last_summary = summary
-        # Panel non-modal yang bisa di-scroll/di-copy (dulu QMessageBox raksasa).
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Ringkasan Sesi")
-        dlg.setStyleSheet(QSS)
-        dlg.resize(640, 480)
-        box = QTextEdit(readOnly=True)
-        box.setPlainText(summary)
-        lay = QVBoxLayout(dlg)
-        lay.addWidget(box)
-        tutup = QPushButton("Tutup")
-        tutup.clicked.connect(dlg.close)
-        lay.addWidget(tutup)
-        self._summary_dialog = dlg
-        dlg.show()
-        self.set_status("Ringkasan selesai — ekspor .md untuk menyimpan transkrip lengkap")
+        # In-app summary card with rendered sections and copy/export actions.
+        self.summary_text.setMarkdown(summary)
+        self.summary_card.show()
+        self.set_status("Summary ready - copy it or export the full transcript below")
 
     def export_md(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Ekspor Transkrip", "lancarin-sesi.md", "Markdown (*.md)")
+        path, _ = QFileDialog.getSaveFileName(self, "Export Transcript", "lancarin-session.md", "Markdown (*.md)")
         if path:
             md = self.session.export_md(getattr(self, "_last_summary", ""))
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(md)
-            self.set_status("Transkrip tersimpan: " + path)
+            self.set_status("Transcript saved: " + path)
 
 
 def main():

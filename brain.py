@@ -78,7 +78,7 @@ class Brain:
     def summarize(self, context_desc: str, transcript: str, my_lang: str) -> str:
         system = (
             f"Summarize this conversation ONLY from its transcript, in {my_lang}. "
-            "Sections: Topik; Poin Penting; Keputusan; Tindak Lanjut; Kosakata Baru. "
+            "Sections: Topic; Key Points; Decisions; Follow-ups; New Vocabulary. "
             "Never invent facts that are not in the transcript."
         )
         if len(transcript) <= CHUNK_CHARS:
@@ -103,19 +103,27 @@ class Brain:
 
 
 def test_connection(cfg: dict, token: str) -> list[tuple[str, bool, str]]:
-    """Lapis 1-2 Tes Koneksi. Lapis 3 (audio) dijalankan UI."""
-    steps: list[tuple[str, bool, str]] = []
+    """Test each selected model separately (translation + suggestions)."""
     if not token:
-        return [("Token", False, "Token kosong — isi token Meta dulu di Pengaturan.")]
-    try:
-        brain = Brain(cfg, token)
-        start = time.time()
-        reply = brain.chat("Reply with exactly: OK", "ping")
-        ms = int((time.time() - start) * 1000)
-        ok = "OK" in reply.upper()
-        steps.append(("Model " + cfg["model"], ok, f"Balasan diterima dalam {ms} ms." if ok else f"Balasan tak terduga: {reply[:80]}"))
-    except Exception as exc:  # tampilkan penyebab yang bisa ditindaklanjuti
-        msg = str(exc)
-        hint = "Periksa token dan model terpilih." if "401" in msg or "auth" in msg.lower() else "Periksa internet / base_url."
-        steps.append(("Model " + cfg["model"], False, f"{msg[:140]} — {hint}"))
+        return [("Token", False, "Token is empty - add your Meta token in Settings first.")]
+    steps: list[tuple[str, bool, str]] = []
+    targets = [("Translation model", cfg.get("translate_model") or cfg["model"]),
+               ("Suggestions & summary model", cfg["model"])]
+    seen = set()
+    for label, model in targets:
+        if model in seen:
+            continue
+        seen.add(model)
+        try:
+            brain = Brain({**cfg, "model": model}, token)
+            start = time.time()
+            reply = brain.chat("Reply with exactly: OK", "ping", timeout=30.0)
+            ms = int((time.time() - start) * 1000)
+            ok = "OK" in reply.upper()
+            steps.append((f"{label} ({model})", ok,
+                          f"replied in {ms / 1000:.1f}s" if ok else f"unexpected reply: {reply[:80]}"))
+        except Exception as exc:  # actionable cause
+            msg = str(exc)
+            hint = "Check the token and selected model." if "401" in msg or "auth" in msg.lower() else "Check your internet connection / Base URL."
+            steps.append((f"{label} ({model})", False, f"{msg[:140]} - {hint}"))
     return steps

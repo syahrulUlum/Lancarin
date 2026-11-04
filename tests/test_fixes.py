@@ -234,7 +234,7 @@ class TestAppFixes(unittest.TestCase):
     def test_interim_basi_dibuang(self):
         win = self._win()
         win._active = True
-        win.on_partial("Lawan", "teks terbaru yang sedang diucapkan")
+        win.on_partial("Other", "teks terbaru yang sedang diucapkan")
         win.on_interim("teks lama", "TERJEMAHAN LAMA")
         self.assertNotEqual(win.panel_translated.text(), "TERJEMAHAN LAMA")
 
@@ -246,7 +246,7 @@ class TestAppFixes(unittest.TestCase):
     def test_stop_membersihkan_panel(self):
         win = self._win()
         win._active = True
-        win.on_partial("Lawan", "halo")
+        win.on_partial("Other", "halo")
         win.stop_streams()
         self.qapp.processEvents()
         self.assertTrue(win.panel_badge.isHidden())
@@ -290,12 +290,12 @@ class TestAppFixes(unittest.TestCase):
 
         win = self._win()
         win.show()
-        win.session.add("Lawan", "halo dunia")
+        win.session.add("Other", "halo dunia")
         win.brain = SlowBrain()
         win.end_session()
         self.assertTrue(win.busy_bar.isVisible(), "tidak ada indikator saat mengakhiri sesi")
         self.assertFalse(win.start_btn.isEnabled(), "tombol Mulai harus terkunci selama ringkasan diproses")
-        self.assertIn("Mengakhiri", win.status_pill.text())
+        self.assertIn("Ending", win.status_pill.text())
         self.assertTrue(self._pump_until(lambda: getattr(win, "_last_summary", "") == "Ringkasan jadi"))
         self.assertFalse(win.busy_bar.isVisible())
         self.assertTrue(win.start_btn.isEnabled())
@@ -313,10 +313,10 @@ class TestAppFixes(unittest.TestCase):
         win = self._win()
         win.brain = SlowBrain()
         win._active = True
-        win.on_partial("Lawan", "hello how are")
+        win.on_partial("Other", "hello how are")
         win._interim_at = 0.0
         win.maybe_interim()
-        win.on_partial("Lawan", "hello how are you doing today my friend")
+        win.on_partial("Other", "hello how are you doing today my friend")
         win._interim_at = 0.0
         win.maybe_interim()
         self.assertEqual(len(win.brain.calls), 2,
@@ -335,7 +335,7 @@ class TestAppFixes(unittest.TestCase):
     def test_interim_awalan_masih_ditampilkan(self):
         win = self._win()
         win._active = True
-        win.on_partial("Lawan", "hello how are you doing today")
+        win.on_partial("Other", "hello how are you doing today")
         win._interim_snapshot = "hello how are"
         win.on_interim("hello how are", "HALO APA KABAR")
         self.assertEqual(win.panel_translated.text(), "HALO APA KABAR")
@@ -359,7 +359,7 @@ class TestAppFixes(unittest.TestCase):
                 return "RINGKASAN BARU"
 
         win = self._win()
-        win.session.add("Lawan", "halo")
+        win.session.add("Other", "halo")
         win.brain = SlowBrain()
         win.end_session()
         win.brain = FastBrain()
@@ -404,22 +404,18 @@ class TestAppFixes(unittest.TestCase):
 
     def test_ringkasan_bukan_modal(self):
         win = self._win()
-        win.on_summary("Isi ringkasan sesi yang penting.")
+        win.show()
+        win.on_summary("Important session summary contents.")
         self.qapp.processEvents()
-        dlg = getattr(win, "_summary_dialog", None)
-        self.assertIsNotNone(dlg)
-        self.assertTrue(dlg.isVisible())
-        from PySide6.QtWidgets import QTextEdit as _TE
-        box = dlg.findChild(_TE)
-        self.assertIsNotNone(box)
-        self.assertIn("Isi ringkasan sesi yang penting.", box.toPlainText())
-        dlg.close()
+        self.assertTrue(win.summary_card.isVisible(), "summary must appear as an in-app card, not a popup")
+        self.assertIn("Important session summary contents.", win.summary_text.toPlainText())
+        self.assertIsNone(getattr(win, "_summary_dialog", None))
 
     def test_status_privat_jujur_saat_sesi_mati(self):
         win = self._win()
         win.private_btn.setChecked(True)
         win.toggle_private()
-        self.assertNotIn("mode privat berjalan", win.status_pill.text().lower())
+        self.assertNotIn("private check is on:", win.status_pill.text().lower())
 
     def test_gerbang_tes_koneksi(self):
         cfg = {"model": "m1", "base_url": "https://x"}
@@ -428,6 +424,59 @@ class TestAppFixes(unittest.TestCase):
         self.assertTrue(appmod.is_tested(cfg))
         cfg["model"] = "m2"
         self.assertFalse(appmod.is_tested(cfg), "ganti model harus menghanguskan tes lama")
+
+
+class TestEnglishAndSettings(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QApplication.instance() or QApplication([])
+
+    def test_ui_utama_bahasa_inggris(self):
+        win = appmod.MainWindow()
+        self.assertEqual(win.start_btn.text(), "▶ Start Session")
+        self.assertEqual(win.stop_btn.text(), "■ End & Summarize")
+        self.assertTrue(win.session_btn.text().startswith("Session"))
+        self.assertNotIn("Mulai", win.start_btn.text())
+
+    def test_dialog_ramping_dan_advanced_terlipat(self):
+        dlg = appmod.SettingsDialog({"model": "muse-wonder-1.0", "translate_model": "muse-wonder-1.0",
+                                     "base_url": "https://x"}, None)
+        self.assertEqual(dlg.windowTitle(), "Lancarin Settings")
+        self.assertTrue(dlg.advanced_box.isHidden(), "base URL harus terlipat di Advanced")
+        dlg.advanced_check.setChecked(True)
+        self.assertFalse(dlg.advanced_box.isHidden())
+
+    def test_tes_koneksi_menguji_dua_model(self):
+        class FakeBrain:
+            seen = []
+
+            def __init__(self, cfg, token):
+                self.model = cfg["model"]
+                FakeBrain.seen.append(self.model)
+
+            def chat(self, system, user, timeout=60.0, model=None):
+                return "OK"
+
+        orig = brain_mod.Brain
+        brain_mod.Brain = FakeBrain
+        try:
+            steps = brain_mod.test_connection(
+                {"model": "muse-spark-1.3", "translate_model": "muse-wonder-1.0",
+                 "base_url": "https://x"}, "tok")
+        finally:
+            brain_mod.Brain = orig
+        names = " | ".join(n for n, _, _ in steps)
+        self.assertIn("muse-wonder-1.0", names)
+        self.assertIn("muse-spark-1.3", names)
+        self.assertTrue(all(ok for _, ok, _ in steps))
+
+    def test_logo_ada_dan_jadi_ikon_jendela(self):
+        from pathlib import Path
+        aset = Path(appmod.__file__).parent / "assets"
+        self.assertTrue((aset / "lancarin.png").exists())
+        self.assertTrue((aset / "lancarin.ico").exists())
+        win = appmod.MainWindow()
+        self.assertFalse(win.windowIcon().isNull(), "ikon jendela harus logo Lancarin")
 
 
 if __name__ == "__main__":

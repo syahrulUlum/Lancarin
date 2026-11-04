@@ -43,10 +43,10 @@ class Session:
         return "\n".join(lines)
 
     def export_md(self, summary: str = "") -> str:
-        parts = [f"# Lancarin — Transkrip Sesi\n\nMulai: {self.started}\n"]
+        parts = [f"# Lancarin - Session Transcript\n\nStarted: {self.started}\n"]
         if self.context_desc:
-            parts.append(f"Konteks: {self.context_desc}\n")
+            parts.append(f"Context: {self.context_desc}\n")
         if summary:
-            parts.append(f"## Ringkasan\n\n{summary}\n")
-        parts.append("## Transkrip Lengkap\n\n" + (self.transcript_text() or "_(kosong)_"))
+            parts.append(f"## Summary\n\n{summary}\n")
+        parts.append("## Full Transcript\n\n" + (self.transcript_text() or "_(empty)_"))
         return "\n".join(parts)

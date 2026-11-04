@@ -32,7 +32,7 @@ class TestInterim(unittest.TestCase):
         win = appmod.MainWindow()
         win.brain = FakeBrain()
         win._active = True
-        win.on_partial("Lawan", "Hello how are you today")
+        win.on_partial("Other", "Hello how are you today")
         win._interim_at = 0.0
         win.maybe_interim()
         for _ in range(50):

@@ -5,6 +5,7 @@ AppVersion=0.1.0
 DefaultDirName={autopf}\Lancarin
 DefaultGroupName=Lancarin
 OutputBaseFilename=Lancarin-Setup
+SetupIconFile=..\assets\lancarin.ico
 Compression=lzma2
 SolidCompression=yes
 

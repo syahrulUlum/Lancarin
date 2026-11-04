@@ -17,17 +17,20 @@ python -m venv .venv
 .venv\Scripts\python app.py
 ```
 
-1. Klik **Pengaturan & Tes Koneksi**, isi token Meta Model API
-   (dari https://dev.meta.ai), pilih model terjemahan dan model
-   saran/ringkasan, jalankan Tes Koneksi sampai ✓, lalu **Simpan** —
-   Mulai Sesi terkunci sampai tes lolos untuk kombinasi itu.
-2. Buka menu **⚙ Pengaturan Sesi** bila perlu: isi deskripsi konteks
-   (opsional), pilih bahasa lawan/saya dan mode. Menu ini terlipat
-   bawaan agar kotak percakapan lega.
-3. **Mulai Sesi** — putar video/panggilan; panel di dalam aplikasi
+Antarmuka aplikasi berbahasa Inggris secara bawaan.
+
+1. Klik **Settings**, isi token Meta Model API (dari https://dev.meta.ai),
+   pilih model terjemahan dan model saran/ringkasan, jalankan
+   **Test Connection** — setiap model diuji terpisah — sampai semua ✓,
+   lalu **Save**. Start Session terkunci sampai tes lolos.
+2. Buka menu **Session** bila perlu: isi konteks (opsional), pilih
+   bahasa lawan/saya dan mode. Menu ini terlipat bawaan agar kotak
+   percakapan lega.
+3. **Start Session** — putar video/panggilan; panel di dalam aplikasi
    menampilkan transkrip, terjemahan besar (tombol A−/A+), dan saran
-   jawaban. `F9` = mode Cek Ucapan privat.
-4. **Akhiri & Ringkasan** — ringkasan sesi dibuat; ekspor `.md` berisi
+   jawaban. `F9` = Private Speech Check.
+4. **End & Summarize** — ringkasan tampil sebagai kartu di dalam
+   aplikasi (bisa disalin/diekspor), bukan popup. Ekspor `.md` berisi
    ringkasan + transkrip lengkap.
 
 Catatan: mode privat tidak meneruskan audio ke aplikasi call; mute mic
