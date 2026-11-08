@@ -65,9 +65,9 @@ class MainWindow(QMainWindow):
 
         header = QLabel("Lancarin")
         header.setStyleSheet("color:#ffffff;font-size:18px;font-weight:700;")
-        _tok = config.get_token()
-        _awal = (f"Token saved ({config.token_hint(_tok)}) - ready to start" if _tok
-                 else "No token yet - open Settings & Test Connection")
+        _ready = config.get_brain_key() and config.get_deepgram_key()
+        _awal = ("Brain + Deepgram keys saved - ready to start" if _ready
+                 else "API keys missing - open Settings & Test Connection")
         self.status_pill = QLabel("○ " + _awal)
         self.status_pill.setStyleSheet(
             "color:#cbd5e1;background:#1c2939;border:1px solid #2b3f58;"
@@ -410,10 +410,10 @@ class MainWindow(QMainWindow):
         dlg = SettingsDialog(self.cfg, self)
         if dlg.exec():
             self.cfg = config.load()
-            tok = config.get_token()
+            ready = config.get_brain_key() and config.get_deepgram_key()
             self.set_status(
-                f"Settings saved - token saved ({config.token_hint(tok)}), ready to start"
-                if tok else "Settings saved - token is still empty")
+                "Settings saved - brain + Deepgram keys saved, ready to start"
+                if ready else "Settings saved - an API key is still empty")
 
     def toggle_private(self):
         self.private_mode = self.private_btn.isChecked()
@@ -491,9 +491,11 @@ class MainWindow(QMainWindow):
 
     # ---------- session lifecycle ----------
     def start_session(self):
-        token = config.get_token()
-        if not token:
-            QMessageBox.warning(self, "Lancarin", "Your Meta token is empty. Open Settings first.")
+        brain_key = config.get_brain_key()
+        deepgram_key = config.get_deepgram_key()
+        if not brain_key or not deepgram_key:
+            missing = "brain API key" if not brain_key else "Deepgram API key"
+            QMessageBox.warning(self, "Lancarin", f"Your {missing} is empty. Open Settings first.")
             return
         if self.opp_lang.currentText() == self.my_lang.currentText():
             QMessageBox.warning(self, "Lancarin",
@@ -511,7 +513,7 @@ class MainWindow(QMainWindow):
         config.save(self.cfg)
         self.set_busy(True, "Starting session - connecting audio & transcription…")
         QApplication.processEvents()
-        self.brain = brain_mod.Brain(self.cfg, token)
+        self.brain = brain_mod.Brain(self.cfg, brain_key)
         self.session = Session(self.context_edit.toPlainText().strip())
         keywords = [k.strip() for k in self.keywords_edit.text().split(",") if k.strip()]
         self._keywords = keywords
@@ -529,11 +531,11 @@ class MainWindow(QMainWindow):
             cap.start()
         opp, mine = self.cfg["opponent_lang"], self.cfg["my_lang"]
         self.stts = [
-            RealtimeSTT(token, self.captures[0].frames, [opp, mine], keywords,
+            RealtimeSTT(deepgram_key, self.captures[0].frames, [opp, mine], keywords,
                         lambda t: self.bridge.partial.emit("Other", t),
                         lambda t: self.bridge.opponent_final.emit(t),
                         lambda e: self.bridge.status.emit("Other-party transcription problem: " + e)),
-            RealtimeSTT(token, self.captures[1].frames, [mine, opp], keywords,
+            RealtimeSTT(deepgram_key, self.captures[1].frames, [mine, opp], keywords,
                         lambda t: self.bridge.partial.emit("You", t),
                         lambda t: self.bridge.mine_final.emit(t),
                         lambda e: self.bridge.status.emit("Your transcription problem: " + e)),
@@ -622,7 +624,7 @@ class MainWindow(QMainWindow):
     def on_translation(self, original, translated):
         if not translated.strip():
             self.panel_badge.hide()
-            self.set_status("The AI returned an empty translation - check the model/token in Settings")
+            self.set_status("The AI returned an empty translation - check the model/API key in Settings")
             self.log.append("<i>→ (empty from AI)</i>")
             return
         self._panel_show(self.panel_translated, translated)

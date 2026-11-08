@@ -1,15 +1,28 @@
-"""Settings dialog: Meta token, the two models, and the connection test."""
+"""Settings dialog: Deepgram STT key + OpenAI-compatible brain, connection test."""
 import threading
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QHBoxLayout,
-                               QLabel, QLineEdit, QPushButton, QTextEdit,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QLineEdit,
+                               QPushButton, QTextEdit, QVBoxLayout)
 
 from . import audio
 from . import brain as brain_mod
 from . import config
+from . import stt as stt_mod
 from .theme import QSS, test_fingerprint
+
+
+def _section(title: str) -> QLabel:
+    label = QLabel(title)
+    label.setObjectName("stepTitle")
+    return label
+
+
+def _hint(text: str) -> QLabel:
+    label = QLabel(text)
+    label.setObjectName("hint")
+    label.setWordWrap(True)
+    return label
 
 
 class SettingsDialog(QDialog):
@@ -23,28 +36,32 @@ class SettingsDialog(QDialog):
         self._test_ran = False
         self.setWindowTitle("Lancarin Settings")
         self.setStyleSheet(QSS)
-        self.resize(480, 420)
-        self.token_edit = QLineEdit()
-        self.token_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        token = config.get_token()
-        self.token_edit.setPlaceholderText(config.token_hint(token) + " - paste a new token to replace it")
-        self.model_box = QComboBox()
-        self.model_box.addItems(config.MODELS)
-        self.model_box.setCurrentText(cfg["model"])
-        self.translate_model_box = QComboBox()
-        self.translate_model_box.addItems(config.MODELS)
-        self.translate_model_box.setCurrentText(cfg.get("translate_model") or config.DEFAULTS["translate_model"])
-        self.base_edit = QLineEdit(cfg["base_url"])
-        self.advanced_check = QCheckBox("Advanced")
-        self.advanced_check.toggled.connect(lambda on: self.advanced_box.setVisible(on))
-        self.advanced_box = QWidget()
-        adv_lay = QVBoxLayout(self.advanced_box)
-        adv_lay.setContentsMargins(0, 0, 0, 0)
-        adv_lay.addWidget(QLabel("Base URL (leave as the Meta default unless you use a proxy):"))
-        adv_lay.addWidget(self.base_edit)
-        self.advanced_box.hide()
+        self.resize(520, 560)
+
+        # --- Speech-to-text (Deepgram) ---
+        self.deepgram_edit = QLineEdit()
+        self.deepgram_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        dg_key = config.get_deepgram_key()
+        self.deepgram_edit.setPlaceholderText(
+            config.token_hint(dg_key) + " - paste a new key to replace it")
+
+        # --- Brain (OpenAI-compatible) ---
+        self.brain_key_edit = QLineEdit()
+        self.brain_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        brain_key = config.get_brain_key()
+        self.brain_key_edit.setPlaceholderText(
+            config.token_hint(brain_key) + " - paste a new key to replace it")
+        self.base_edit = QLineEdit(cfg.get("base_url") or config.DEFAULTS["base_url"])
+        self.base_edit.setPlaceholderText("https://api.groq.com/openai/v1")
+        self.translate_model_edit = QLineEdit(
+            cfg.get("translate_model") or cfg.get("model") or config.DEFAULTS["translate_model"])
+        self.translate_model_edit.setPlaceholderText("openai/gpt-oss-20b")
+        self.model_edit = QLineEdit(cfg.get("model") or config.DEFAULTS["model"])
+        self.model_edit.setPlaceholderText("openai/gpt-oss-120b")
+
         self.result = QTextEdit(readOnly=True)
-        self.result.setPlaceholderText("Connection test results appear here. Each selected model is tested separately.")
+        self.result.setPlaceholderText(
+            "Connection test results appear here. Each brain model is tested separately.")
         self.result.setMaximumHeight(120)
         self.result_ready.connect(self.result.setPlainText)
         test_btn = QPushButton("Test Connection")
@@ -56,46 +73,74 @@ class SettingsDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
         self._save_btn = save_btn
         self.result_ready.connect(lambda _t: self._save_btn.setEnabled(True))
+
         lay = QVBoxLayout(self)
         lay.setSpacing(8)
-        title = QLabel("Settings"); title.setObjectName("stepTitle")
+        title = QLabel("Settings")
+        title.setObjectName("stepTitle")
         lay.addWidget(title)
-        lay.addWidget(QLabel("Meta Model API token (stored securely in your OS keychain; get one at dev.meta.ai):"))
-        lay.addWidget(self.token_edit)
+
+        lay.addWidget(_section("1 · Speech-to-text — Deepgram"))
+        lay.addWidget(QLabel(f"Model: Deepgram {config.STT_MODEL} Multilingual (streaming, fixed)"))
+        lay.addWidget(QLabel("Deepgram API key (stored securely in your OS keychain; get one at deepgram.com):"))
+        lay.addWidget(self.deepgram_edit)
+        lay.addWidget(_hint(
+            "Handles live transcription only. Interim text streams while the other party "
+            "speaks; no audio is sent anywhere else."))
+
+        lay.addWidget(_section("2 · Brain — translation, suggestions, summary"))
+        lay.addWidget(QLabel("Base URL (OpenAI-compatible endpoint):"))
+        lay.addWidget(self.base_edit)
+        lay.addWidget(QLabel("Brain API key for that endpoint (stored securely in your OS keychain):"))
+        lay.addWidget(self.brain_key_edit)
         models = QHBoxLayout()
-        left = QVBoxLayout(); left.addWidget(QLabel("Translation model:")); left.addWidget(self.translate_model_box)
-        right = QVBoxLayout(); right.addWidget(QLabel("Suggestions and summary:")); right.addWidget(self.model_box)
-        models.addLayout(left, 1); models.addLayout(right, 1)
+        left = QVBoxLayout()
+        left.addWidget(QLabel("Translation model (fast):"))
+        left.addWidget(self.translate_model_edit)
+        right = QVBoxLayout()
+        right.addWidget(QLabel("Suggestions & summary model:"))
+        right.addWidget(self.model_edit)
+        models.addLayout(left, 1)
+        models.addLayout(right, 1)
         lay.addLayout(models)
-        hint = QLabel("Translation runs live, so a fast model matters most there (muse-wonder-1.0 measured fastest). Suggestions and summaries benefit from a stronger reasoning model.")
-        hint.setObjectName("hint"); hint.setWordWrap(True)
-        lay.addWidget(hint)
-        lay.addWidget(self.advanced_check)
-        lay.addWidget(self.advanced_box)
+        lay.addWidget(_hint(
+            "OpenAI-compatible providers only: the endpoint must support the OpenAI "
+            "Chat Completions API (/v1/chat/completions) — e.g. Groq "
+            "(https://api.groq.com/openai/v1), OpenAI (https://api.openai.com/v1), "
+            "OpenRouter, or Cerebras. Type any model name the provider offers; "
+            "translation runs live, so pick a fast model there. Model names are free "
+            "text, so changing models later needs no app update."))
+
         lay.addWidget(test_btn)
         lay.addWidget(self.result)
         btn_row = QHBoxLayout()
-        btn_row.addStretch(1); btn_row.addWidget(cancel_btn); btn_row.addWidget(save_btn)
+        btn_row.addStretch(1)
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(save_btn)
         lay.addLayout(btn_row)
 
     def current_cfg(self):
         cfg = dict(self.cfg)
-        cfg["model"] = self.model_box.currentText()
-        cfg["translate_model"] = self.translate_model_box.currentText()
+        cfg["model"] = self.model_edit.text().strip() or config.DEFAULTS["model"]
+        cfg["translate_model"] = (self.translate_model_edit.text().strip()
+                                  or config.DEFAULTS["translate_model"])
         cfg["base_url"] = self.base_edit.text().strip() or config.DEFAULTS["base_url"]
         return cfg
 
     def run_test(self):
         self._save_btn.setEnabled(False)  # do not save while the test is running
-        self.result.setPlainText("Testing each model and your audio devices…")
-        token = self.token_edit.text().strip() or config.get_token()
+        self.result.setPlainText("Testing each model, Deepgram, and your audio devices…")
+        brain_key = self.brain_key_edit.text().strip() or config.get_brain_key()
+        dg_key = self.deepgram_edit.text().strip() or config.get_deepgram_key()
         cfg = self.current_cfg()
 
         def work():
             lines = []
-            brain_steps = brain_mod.test_connection(cfg, token)
+            brain_steps = brain_mod.test_connection(cfg, brain_key)
+            dg_ok, dg_msg = stt_mod.check_key(dg_key)
+            lines.append(("✓ " if dg_ok else "✗ ") + "Deepgram API key: " + dg_msg)
             self._test_ran = True
-            self.test_ok = bool(brain_steps) and all(ok for _, ok, _ in brain_steps)
+            self.test_ok = dg_ok and bool(brain_steps) and all(ok for _, ok, _ in brain_steps)
             self._tested_for = test_fingerprint(cfg) if self.test_ok else ""
             for name, ok, msg in brain_steps:
                 lines.append(("✓ " if ok else "✗ ") + name + ": " + msg)
@@ -110,9 +155,12 @@ class SettingsDialog(QDialog):
         threading.Thread(target=work, daemon=True).start()
 
     def save(self):
-        token = self.token_edit.text().strip()
-        if token:
-            config.set_token(token)
+        brain_key = self.brain_key_edit.text().strip()
+        if brain_key:
+            config.set_brain_key(brain_key)
+        dg_key = self.deepgram_edit.text().strip()
+        if dg_key:
+            config.set_deepgram_key(dg_key)
         cfg = self.current_cfg()
         if self.test_ok and self._tested_for == test_fingerprint(cfg):
             cfg["tested_ok_for"] = self._tested_for
@@ -120,5 +168,3 @@ class SettingsDialog(QDialog):
             cfg.pop("tested_ok_for", None)  # tes ulang gagal: gerbang lama hangus
         config.save(cfg)
         self.accept()
-
-

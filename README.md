@@ -2,8 +2,9 @@
 
 A real-time desktop assistant that captures and translates audio from Zoom,
 Meet, and YouTube, then suggests English replies that fit the conversation.
-Built for Indonesian professionals, powered by Muse Spark and Muse Voice
-Transcribe from the Meta Model API.
+Built for Indonesian professionals. Live transcription by Deepgram Nova-3
+Multilingual (streaming); translation, reply suggestions, and summaries by
+any OpenAI-compatible brain provider configured in Settings (Groq by default).
 
 Full plan: [docs/rencana.md](docs/rencana.md)
 
@@ -23,11 +24,13 @@ python -m venv .venv
 
 The application UI is in English by default.
 
-1. Click **Settings**, enter your Meta Model API token (from
-   https://dev.meta.ai), pick a translation model and a suggestions/summary
-   model, then run **Test Connection** - each model is tested separately -
-   until every line shows a checkmark, and **Save**. Start Session stays
-   locked until the test passes.
+1. Click **Settings**. Section 1: enter your Deepgram API key (from
+   deepgram.com) for live transcription. Section 2: enter the brain Base URL,
+   API key, translation model, and suggestions/summary model - any
+   OpenAI-compatible endpoint works (Groq, OpenAI, OpenRouter, Cerebras);
+   model names are free text. Run **Test Connection** - each model is tested
+   separately - until every line shows a checkmark, and **Save**. Start
+   Session stays locked until the test passes.
 2. Open the **Session** menu if needed: add context (optional), pick the
    other party's language and yours, and choose a mode. The menu is
    collapsed by default so the conversation panel stays spacious.
@@ -45,10 +48,10 @@ adapters are tracked in the GitHub backlog issues.
 ## Measured results (development machine, Nov 2026)
 
 - Connection test passes. Translation uses the selected translation model
-  (default `muse-wonder-1.0`, measured at about 2.5s) and appears first;
-  the suggested reply follows in parallel from the suggestions model
-  (about 8s total). Streaming does not help: a reasoning model's first
-  token only arrives after 5-7s.
+  and appears first; the suggested reply follows in parallel from the
+  suggestions model. (Historical Meta-provider measurements: ~2.5s
+  translation, ~8s total; Deepgram + OpenAI-compatible brain latency still
+  to be re-measured.)
 - Interim translation now works in chunks: each new sentence fragment is
   translated and appended while the other party keeps speaking, instead
   of re-translating the whole partial transcript.

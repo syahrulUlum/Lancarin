@@ -1,4 +1,8 @@
-"""Lancarin AI brain: translation, reply suggestions, summaries (Meta models)."""
+"""Lancarin AI brain: translation, reply suggestions, summaries.
+
+Provider-agnostic: any OpenAI-compatible endpoint (Groq, OpenAI, OpenRouter,
+Cerebras, ...) configured via base_url + model names + API key in Settings.
+"""
 import time
 
 from openai import OpenAI
@@ -6,9 +10,6 @@ from openai import OpenAI
 from . import config
 
 CHUNK_CHARS = 8000
-# Terjemahan harus secepat mungkin: terukur di mesin ini wonder menjawab
-# measured 2-5s vs Spark 4-10s. Suggestions/summaries keep the user's model.
-FAST_MODEL = "muse-wonder-1.0"
 
 
 def _parse(raw: str, *labels: str) -> dict[str, str]:
@@ -34,11 +35,11 @@ class Brain:
         self.client = OpenAI(api_key=token, base_url=cfg["base_url"],
                              timeout=60.0, max_retries=1)
         self.model = cfg["model"]
-        self.translate_model = cfg.get("translate_model") or FAST_MODEL
+        self.translate_model = cfg.get("translate_model") or cfg["model"]
 
     def chat(self, system: str, user: str, timeout: float = 60.0, model: str = None) -> str:
-        # Tanpa max_tokens: pada Muse Spark batas kecil dimakan proses
-        # the model's reasoning and the final content comes back empty.
+        # Tanpa max_tokens: pada model reasoning batas kecil dimakan proses
+        # berpikirnya dan konten final kembali kosong.
         r = self.client.chat.completions.create(
             model=model or self.model,
             messages=[{"role": "system", "content": system},
@@ -105,7 +106,7 @@ class Brain:
 def test_connection(cfg: dict, token: str) -> list[tuple[str, bool, str]]:
     """Test each selected model separately (translation + suggestions)."""
     if not token:
-        return [("Token", False, "Token is empty - add your Meta token in Settings first.")]
+        return [("Brain API key", False, "Brain API key is empty - add it in Settings first.")]
     steps: list[tuple[str, bool, str]] = []
     targets = [("Translation model", cfg.get("translate_model") or cfg["model"]),
                ("Suggestions and summary model", cfg["model"])]
@@ -124,6 +125,6 @@ def test_connection(cfg: dict, token: str) -> list[tuple[str, bool, str]]:
                           f"replied in {ms / 1000:.1f}s" if ok else f"unexpected reply: {reply[:80]}"))
         except Exception as exc:  # actionable cause
             msg = str(exc)
-            hint = "Check the token and selected model." if "401" in msg or "auth" in msg.lower() else "Check your internet connection / Base URL."
+            hint = "Check the API key and selected model." if "401" in msg or "auth" in msg.lower() else "Check your internet connection / Base URL."
             steps.append((f"{label} ({model})", False, f"{msg[:140]} - {hint}"))
     return steps

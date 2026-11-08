@@ -381,8 +381,12 @@ class TestAppFixes(unittest.TestCase):
         import app as _app
         saved = {}
         orig_save, orig_test = _app.config.save, _app.brain_mod.test_connection
+        orig_dg = _app.config.get_deepgram_key
+        orig_check = stt.check_key
         orig_warn = _app.QMessageBox.warning
         _app.config.save = lambda cfg: saved.update(cfg)
+        _app.config.get_deepgram_key = lambda: "dg-key"
+        stt.check_key = lambda key: (True, "ok")
         _app.brain_mod.test_connection = lambda cfg, tok: [("Model", True, "ok")]
         try:
             dlg = _app.SettingsDialog({"model": "muse-spark-1.3", "translate_model": "muse-wonder-1.0",
@@ -395,17 +399,20 @@ class TestAppFixes(unittest.TestCase):
                 {"model": "muse-spark-1.3", "translate_model": "muse-wonder-1.0", "base_url": "https://x"}))
         finally:
             _app.config.save, _app.brain_mod.test_connection = orig_save, orig_test
+            _app.config.get_deepgram_key = orig_dg
+            stt.check_key = orig_check
         # Start terkunci tanpa gerbang
         win = self._win()
         win.cfg.pop("tested_ok_for", None)
         warnings = []
-        orig_tok = _app.config.get_token
-        _app.config.get_token = lambda: "tok"
+        orig_brain, orig_dg2 = _app.config.get_brain_key, _app.config.get_deepgram_key
+        _app.config.get_brain_key = lambda: "tok"
+        _app.config.get_deepgram_key = lambda: "dg"
         _app.QMessageBox.warning = staticmethod(lambda *a: warnings.append(a))
         try:
             win.start_session()
         finally:
-            _app.config.get_token = orig_tok
+            _app.config.get_brain_key, _app.config.get_deepgram_key = orig_brain, orig_dg2
             _app.QMessageBox.warning = orig_warn
         self.assertTrue(warnings)
         self.assertFalse(win._active)
@@ -447,13 +454,18 @@ class TestEnglishAndSettings(unittest.TestCase):
         self.assertTrue(win.session_btn.text().startswith("Session"))
         self.assertNotIn("Mulai", win.start_btn.text())
 
-    def test_settings_dialog_is_slim_with_collapsed_advanced(self):
-        dlg = appmod.SettingsDialog({"model": "muse-wonder-1.0", "translate_model": "muse-wonder-1.0",
-                                     "base_url": "https://x"}, None)
+    def test_settings_dialog_shows_deepgram_and_brain_fields(self):
+        dlg = appmod.SettingsDialog({"model": "openai/gpt-oss-120b", "translate_model": "openai/gpt-oss-20b",
+                                     "base_url": "https://api.groq.com/openai/v1"}, None)
         self.assertEqual(dlg.windowTitle(), "Lancarin Settings")
-        self.assertTrue(dlg.advanced_box.isHidden(), "the Base URL must be collapsed under Advanced")
-        dlg.advanced_check.setChecked(True)
-        self.assertFalse(dlg.advanced_box.isHidden())
+        # Semua kolom brain tampil langsung: ganti provider/model tidak perlu update aplikasi.
+        self.assertEqual(dlg.base_edit.text(), "https://api.groq.com/openai/v1")
+        self.assertEqual(dlg.model_edit.text(), "openai/gpt-oss-120b")
+        self.assertEqual(dlg.translate_model_edit.text(), "openai/gpt-oss-20b")
+        self.assertIsNotNone(dlg.deepgram_edit)
+        self.assertIsNotNone(dlg.brain_key_edit)
+        cfg = dlg.current_cfg()
+        self.assertEqual(cfg["base_url"], "https://api.groq.com/openai/v1")
 
     def test_connection_test_covers_both_models(self):
         class FakeBrain:

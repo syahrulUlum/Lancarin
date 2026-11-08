@@ -15,7 +15,7 @@ from lancarin import stt
 
 async def _dns_probe():
     loop = asyncio.get_running_loop()
-    return await loop.getaddrinfo("api.meta.ai", 443)
+    return await loop.getaddrinfo("api.deepgram.com", 443)
 
 
 class TestSttThread(unittest.TestCase):
