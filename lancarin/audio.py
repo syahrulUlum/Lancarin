@@ -80,17 +80,25 @@ class Capture:
         self.level = 0.0
         self._stop = threading.Event()
         self._thread = None
+        self._stream = None
 
     def start(self):
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
     def stop(self):
+        # Jangan close() stream dari thread ini: PortAudio crash (access
+        # violation) bila stream ditutup saat read() di thread capture block.
+        # Stream ditutup thread pemiliknya sendiri di _run; thread yang masih
+        # hidup sesudah timeout ditangani retensi referensi di app.stop_streams.
         self._stop.set()
 
     def wait(self, timeout=None):
         if self._thread:
             self._thread.join(timeout)
+
+    def is_alive(self):
+        return bool(self._thread and self._thread.is_alive())
 
     def _run(self):
         pa = _get_pa()
@@ -102,6 +110,7 @@ class Capture:
             stream = pa.open(format=pyaudio.paFloat32, channels=channels, rate=rate,
                              input=True, input_device_index=self.device_index,
                              frames_per_buffer=2048)
+            self._stream = stream
             while not self._stop.is_set():
                 data = stream.read(2048, exception_on_overflow=False)
                 arr = np.frombuffer(data, dtype=np.float32)
@@ -115,5 +124,9 @@ class Capture:
             if not self._stop.is_set() and self.on_error:
                 self.on_error(str(exc)[:200])
         finally:
+            self._stream = None
             if stream:
-                stream.close()
+                try:
+                    stream.close()
+                except Exception:
+                    pass

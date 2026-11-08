@@ -70,7 +70,9 @@ class Brain:
         )
         user = (f"Context: {context_desc or '-'}\nNames/terms: {', '.join(keywords or []) or '-'}\n\n"
                 f"History:\n{history or '-'}\n\nOther person just said: {opponent_text}")
-        raw = self.chat(system, user)
+        # Saran yang datang setelah 25 detik sudah tidak berguna untuk percakapan
+        # langsung; gagal cepat lebih baik daripada panel menggantung seminit.
+        raw = self.chat(system, user, timeout=25.0)
         got = _parse(raw, "REPLY", "MEANING", "EN", "ID")
         reply = got.get("REPLY") or got.get("EN", "")
         meaning = got.get("MEANING") or got.get("ID", "")

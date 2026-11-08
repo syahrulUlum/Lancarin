@@ -37,7 +37,7 @@ class ChatBrain(brain_mod.Brain):
         self.reply = reply
         self.calls = []
 
-    def chat(self, system, user):
+    def chat(self, system, user, **kwargs):
         self.calls.append((system, user))
         return self.reply
 
@@ -243,6 +243,27 @@ class TestAppFixes(unittest.TestCase):
         win.on_translation("hello <b>everyone</b>", "<i>translation</i> & greetings")
         self.assertIn("<i>translation</i> & greetings", win.log.toPlainText())
 
+    def test_stop_keeps_refs_to_threads_still_alive(self):
+        class StubStt:
+            def __init__(self):
+                self.stopped = False
+
+            def stop(self):
+                self.stopped = True
+
+            def join(self, timeout=None):
+                pass
+
+            def is_alive(self):
+                return True  # join timeout: koneksi lama belum benar-benar mati
+
+        win = self._win()
+        stub = StubStt()
+        win.stts = [stub]
+        win.stop_streams()
+        self.assertEqual(win.stts, [stub],
+                         "refs to a still-alive STT thread must be kept so the next start can close it instead of duplicating it")
+
     def test_stop_clears_panel(self):
         win = self._win()
         win._active = True
@@ -426,6 +447,40 @@ class TestAppFixes(unittest.TestCase):
         self.assertIn("Important session summary contents.", win.summary_text.toPlainText())
         self.assertIsNone(getattr(win, "_summary_dialog", None))
 
+    def test_private_translation_is_recorded_not_in_suggestion(self):
+        class TranslateBrain:
+            def translate(self, text, src, dst):
+                return "How was your day?"
+
+        win = self._win()
+        win.brain = TranslateBrain()
+        win.private_mode = True
+        win._active = True
+        win.on_mine("Bagaimana harimu?")
+        self.assertTrue(self._pump_until(lambda: "How was your day?" in win.log.toPlainText()),
+                        "private translation must be written to the transcript log")
+        self.assertEqual(win.session.turns[-1].translation, "How was your day?")
+        self.assertIn("How was your day?", win.panel_translated.text())
+        self.assertNotIn("How was your day?", win.panel_suggested.text())
+        win.stop_streams()
+
+    def test_suggestion_failure_is_visible_in_panel(self):
+        class FailBrain:
+            def translate(self, text, src, dst):
+                return "Terjemahan"
+
+            def suggest(self, *args):
+                raise RuntimeError("429 rate limited")
+
+        win = self._win()
+        win.brain = FailBrain()
+        win.cfg["mode"] = "conversation"
+        win._active = True
+        win.on_opponent("How was your day today?")
+        self.assertTrue(self._pump_until(lambda: "failed" in win.panel_suggested.text().lower()),
+                        "a failed suggestion must be explained in the suggestion panel, not only the status pill")
+        win.stop_streams()
+
     def test_private_status_is_honest_when_idle(self):
         win = self._win()
         win.private_btn.setChecked(True)
@@ -448,8 +503,8 @@ class TestEnglishAndSettings(unittest.TestCase):
 
     def test_main_ui_is_english(self):
         win = appmod.MainWindow()
-        self.assertEqual(win.start_btn.text(), "▶ Start Session")
-        self.assertEqual(win.stop_btn.text(), "■ End and Summarize")
+        self.assertEqual(win.start_btn.text(), "▶ Start")
+        self.assertEqual(win.stop_btn.text(), "■ End")
         self.assertNotIn("&", win.stop_btn.text(), "& di Qt membuat garis bawah mnemonic")
         self.assertTrue(win.session_btn.text().startswith("Session"))
         self.assertNotIn("Mulai", win.start_btn.text())
@@ -532,7 +587,7 @@ class TestCompactAndState(unittest.TestCase):
         self.assertFalse(win.stop_btn.isEnabled())
         win._set_session_state("idle")
         self.assertTrue(win.start_btn.isEnabled())
-        self.assertEqual(win.start_btn.text(), "▶ Start Session")
+        self.assertEqual(win.start_btn.text(), "▶ Start")
 
 
 class TestStatePolish(unittest.TestCase):
@@ -569,11 +624,11 @@ class TestStatePolish(unittest.TestCase):
         win.show()
         self.qapp.processEvents()
         from PySide6.QtWidgets import QBoxLayout
-        self.assertEqual(win.action_layout.direction(), QBoxLayout.Direction.TopToBottom,
-                         "at narrow widths the main buttons must stack vertically")
-        win.resize(900, 600)
-        self.qapp.processEvents()
+        # Tombol tetap sebaris ramping di jendela sempit, bukan ditumpuk 6 baris.
         self.assertEqual(win.action_layout.direction(), QBoxLayout.Direction.LeftToRight)
+        self.assertEqual(win.util_layout.direction(), QBoxLayout.Direction.LeftToRight)
+        self.assertTrue(win.mode_conversation.isVisible(),
+                        "mode selector must stay visible even with the Session panel collapsed")
 
     def test_setup_is_locked_while_live(self):
         win = appmod.MainWindow()

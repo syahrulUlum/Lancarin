@@ -27,6 +27,7 @@ class Bridge(QObject):
     partial = Signal(str, str)  # who, text
     interim_chunk = Signal(str, str)  # source prefix covered, translated chunk
     suggestion = Signal(str)
+    private_translation = Signal(str, str)  # your text, its translation
     translation = Signal(str, str)  # original, translated
     summary_ready = Signal(str)
     status = Signal(str)
@@ -114,31 +115,33 @@ class MainWindow(QMainWindow):
         self.lang_layout = lang_row
         lay1.addWidget(self.context_edit)
         lay1.addWidget(self.keywords_edit)
-        mode_row = QHBoxLayout()
-        mode_row.addWidget(self.mode_conversation)
-        mode_row.addWidget(self.mode_translate)
-        mode_row.addStretch(1)
-        lay1.addLayout(mode_row)
 
-        self.start_btn = QPushButton("▶ Start Session")
+        self.start_btn = QPushButton("▶ Start")
         self.start_btn.setObjectName("primary")
+        self.start_btn.setToolTip("Start Session")
         self.start_btn.clicked.connect(self.start_session)
-        self.stop_btn = QPushButton("■ End and Summarize")
+        self.stop_btn = QPushButton("■ End")
         self.stop_btn.setObjectName("danger")
+        self.stop_btn.setToolTip("End and Summarize")
         self.stop_btn.clicked.connect(self.end_session)
         self.stop_btn.setEnabled(False)
-        self.private_btn = QPushButton("Private Speech Check (F9)")
+        self.private_btn = QPushButton("Private (F9)")
         self.private_btn.setObjectName("privateBtn")
+        self.private_btn.setToolTip("Private Speech Check (F9)")
         self.private_btn.setCheckable(True)
         self.private_btn.clicked.connect(self.toggle_private)
-        export_btn = QPushButton("Export Transcript (.md)")
+        export_btn = QPushButton("Export")
+        export_btn.setToolTip("Export Transcript (.md)")
         export_btn.clicked.connect(self.export_md)
-        self.new_session_btn = QPushButton("New Session")
+        self.new_session_btn = QPushButton("New")
+        self.new_session_btn.setToolTip("New Session")
         self.new_session_btn.clicked.connect(self.new_session)
-        self.summary_btn = QPushButton("View Summary")
+        self.summary_btn = QPushButton("Summary")
         self.summary_btn.setEnabled(False)
         self.summary_btn.setToolTip("Available after a session summary has been created")
         self.summary_btn.clicked.connect(lambda: self.summary_card.show())
+        for btn in (export_btn, self.new_session_btn, self.summary_btn):
+            btn.setObjectName("compact")
         self._sess_state = "idle"
         self.session_state = QLabel("")
         self.session_state.setStyleSheet(
@@ -150,11 +153,23 @@ class MainWindow(QMainWindow):
         action_row.addWidget(self.stop_btn, 2)
         self.action_layout = action_row
         util_row = QHBoxLayout()
+        util_row.setSpacing(5)
         util_row.addWidget(self.private_btn)
         util_row.addWidget(self.new_session_btn)
         util_row.addWidget(self.summary_btn)
         util_row.addWidget(export_btn)
         util_row.addStretch(1)
+        # Pemilih mode selalu terlihat (bukan di panel Session yang terlipat):
+        # mode "Translation only" yang tidak disadari = saran tidak pernah muncul.
+        mode_caption = QLabel("Mode:")
+        mode_caption.setObjectName("hint")
+        util_row.addWidget(mode_caption)
+        self.mode_conversation.setText("Conversation")
+        self.mode_conversation.setToolTip("Conversation (translation + reply suggestions)")
+        self.mode_translate.setText("Translate only")
+        self.mode_translate.setToolTip("Translation only (no reply suggestions)")
+        util_row.addWidget(self.mode_conversation)
+        util_row.addWidget(self.mode_translate)
         self.util_layout = util_row
 
         self.level_loop = QProgressBar(maximum=100)
@@ -265,6 +280,7 @@ class MainWindow(QMainWindow):
         self.bridge.partial.connect(self.on_partial)
         self.bridge.interim_chunk.connect(self.on_interim_chunk)
         self.bridge.suggestion.connect(self.on_suggestion)
+        self.bridge.private_translation.connect(self.on_private_translation)
         self.bridge.translation.connect(self.on_translation)
         self.bridge.summary_ready.connect(self.on_summary)
         self.bridge.status.connect(self.set_status)
@@ -303,7 +319,7 @@ class MainWindow(QMainWindow):
         self.summary_btn.setEnabled(not locked and bool(getattr(self, "_last_summary", "")))
         if state == "live":
             self.start_btn.setEnabled(False)
-            self.start_btn.setText("● Session Running")
+            self.start_btn.setText("● Running")
             self.start_btn.setToolTip("A session is already running")
             self.stop_btn.setEnabled(True)
             self.stop_btn.setToolTip("End the current session and build its summary")
@@ -314,18 +330,17 @@ class MainWindow(QMainWindow):
             self.stop_btn.setToolTip("Finishing the summary…")
         else:
             self.start_btn.setEnabled(True)
-            self.start_btn.setText("▶ Start Session")
-            self.start_btn.setToolTip("")
+            self.start_btn.setText("▶ Start")
+            self.start_btn.setToolTip("Start Session")
             self.stop_btn.setEnabled(False)
             self.stop_btn.setToolTip("Start a session first - End is available while a session is running")
         self.update_mode_label()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        compact = self.width() < 680
-        arah = QBoxLayout.Direction.TopToBottom if compact else QBoxLayout.Direction.LeftToRight
-        self.action_layout.setDirection(arah)
-        self.util_layout.setDirection(arah)
+        # Tombol dirancang ramping: tetap sebaris di semua lebar, tidak ditumpuk.
+        self.action_layout.setDirection(QBoxLayout.Direction.LeftToRight)
+        self.util_layout.setDirection(QBoxLayout.Direction.LeftToRight)
 
     def new_session(self):
         if self._active:
@@ -338,6 +353,9 @@ class MainWindow(QMainWindow):
             if answer != QMessageBox.StandardButton.Yes:
                 return
         self.session = Session(self.context_edit.toPlainText().strip())
+        self._gen += 1  # hasil thread sesi lama (termasuk interim) tidak boleh bocor ke sesi baru
+        self._partial = ""
+        self.brain = None
         self._last_summary = ""
         self.summary_text.clear()
         self.summary_card.hide()
@@ -507,6 +525,14 @@ class MainWindow(QMainWindow):
                                 "The connection test has not passed for these model settings yet. "
                                 "Open Settings, run Test Connection until every line shows a checkmark, then Save.")
             return
+        if self.stts or self.captures:
+            # Koneksi/perangkat sesi sebelumnya belum benar-benar tertutup:
+            # coba tutup lagi, dan jangan tumpuk koneksi baru di atasnya.
+            self.stop_streams()
+            if self.stts or self.captures:
+                QMessageBox.warning(self, "Lancarin",
+                                    "The previous session is still closing. Wait a few seconds, then press Start again.")
+                return
         mode = "conversation" if self.mode_conversation.isChecked() else "translate"
         self.cfg.update({"opponent_lang": self.opp_lang.currentText(),
                          "my_lang": self.my_lang.currentText(), "mode": mode})
@@ -592,10 +618,16 @@ class MainWindow(QMainWindow):
             def work_suggest():
                 try:
                     suggestion = brain.suggest(session.context_desc, history, text, opp, mine, list(self._keywords))
-                    if gen == self._gen and suggestion.strip():
+                    if gen != self._gen:
+                        return
+                    if suggestion.strip():
                         self.bridge.suggestion.emit("Suggested reply: " + suggestion.replace("\n", "   ·   "))
+                    else:
+                        # Panel tidak boleh diam kosong: pengguna mengira fitur rusak.
+                        self.bridge.suggestion.emit("Suggestion came back empty from the AI - see the translation above.")
                 except Exception as exc:
                     if gen == self._gen:
+                        self.bridge.suggestion.emit("Suggestion failed: " + str(exc)[:120])
                         self.bridge.status.emit("Suggestion problem: " + str(exc)[:160])
 
             threading.Thread(target=work_suggest, daemon=True).start()
@@ -603,7 +635,7 @@ class MainWindow(QMainWindow):
     def on_mine(self, text):
         if not self._active:
             return
-        self.session.add("You", text)
+        turn = self.session.add("You", text)
         label = "You (private): " if self.private_mode else "You: "
         self.log.append(f"<b>{label}</b> {html.escape(text)}")
         if self.private_mode and self.brain:
@@ -614,12 +646,24 @@ class MainWindow(QMainWindow):
                 try:
                     result = brain.translate(text, mine, opp)
                     if gen == self._gen:
-                        self.bridge.suggestion.emit(f"Your speech in {opp}: " + result)
+                        turn.translation = result
+                        self.bridge.private_translation.emit(text, result)
                 except Exception as exc:
                     if gen == self._gen:
                         self.bridge.status.emit("AI problem: " + str(exc)[:160])
 
             threading.Thread(target=work, daemon=True).start()
+
+    def on_private_translation(self, original, translated):
+        # Terjemahan ucapan sendiri masuk panel Translation + tercatat di log
+        # dan di turn sesi (untuk ringkasan/ekspor), BUKAN panel suggestion.
+        if not translated.strip():
+            return
+        opp = self.cfg["opponent_lang"]
+        self._panel_show(self.panel_original, original)
+        self._panel_show(self.panel_translated, translated)
+        self._panel_processing(f"● YOUR SPEECH IN {opp.upper()}")
+        self.log.append(f"<i>→ ({html.escape(opp)}) {html.escape(translated)}</i>")
 
     def on_translation(self, original, translated):
         if not translated.strip():
@@ -645,7 +689,11 @@ class MainWindow(QMainWindow):
             s.join(timeout=2)
         for c in self.captures:
             c.wait(timeout=2)
-        self.stts, self.captures = [], []
+        # shortcut: thread yang belum mati setelah timeout referensinya dibuang
+        # di sini dulu; sesi berikutnya lalu menabrak koneksi/perangkat lama
+        # yang masih hidup dan error sampai aplikasi ditutup. Simpan sisanya.
+        self.stts = [s for s in self.stts if s.is_alive()]
+        self.captures = [c for c in self.captures if c.is_alive()]
         self.panel_badge.hide()
 
     def end_session(self):
