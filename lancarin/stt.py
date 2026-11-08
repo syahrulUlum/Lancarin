@@ -27,9 +27,6 @@ import websockets
 
 from . import config
 
-EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="lancarin-stt")
-
-
 def check_key(key: str) -> tuple[bool, str]:
     """Validasi API key Deepgram tanpa membuka WebSocket (GET /v1/projects)."""
     if not key:
@@ -46,13 +43,20 @@ def check_key(key: str) -> tuple[bool, str]:
 
 
 def run_event_loop(coro):
-    """Jalankan coroutine di loop baru dengan executor bersama di atas."""
+    """Jalankan coroutine di loop baru dengan executor BARU khusus loop itu.
+
+    Jangan pernah berbagi executor antar-loop: loop.close() mematikan
+    default executor-nya, dan loop berikutnya (sesi kedua, reconnect) lalu
+    gagal "cannot schedule new futures after shutdown" sampai restart.
+    """
     loop = asyncio.new_event_loop()
-    loop.set_default_executor(EXECUTOR)
+    executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="lancarin-stt")
+    loop.set_default_executor(executor)
     try:
         return loop.run_until_complete(coro)
     finally:
         loop.close()
+        executor.shutdown(wait=False)
 
 
 def build_url(languages: list[str], keywords: list[str]) -> str:

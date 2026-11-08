@@ -18,7 +18,19 @@ async def _dns_probe():
     return await loop.getaddrinfo("api.deepgram.com", 443)
 
 
+async def _executor_probe():
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: 42)
+
+
 class TestSttThread(unittest.TestCase):
+    def test_event_loop_reusable_after_close(self):
+        # Regresi: executor bersama dimatikan loop.close() pertama, sehingga
+        # sesi kedua gagal "cannot schedule new futures after shutdown" dan
+        # aplikasi harus direstart. Setiap loop harus punya executor sendiri.
+        self.assertEqual(stt.run_event_loop(_executor_probe()), 42)
+        self.assertEqual(stt.run_event_loop(_executor_probe()), 42)
+
     def test_dns_in_worker_thread(self):
         result = {}
 

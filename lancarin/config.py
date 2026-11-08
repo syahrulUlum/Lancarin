@@ -36,6 +36,7 @@ DEFAULTS = {
     "opponent_lang": "English",
     "my_lang": "Indonesian",
     "mode": "conversation",
+    "panel_font": 16,
 }
 
 

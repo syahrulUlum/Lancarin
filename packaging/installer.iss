@@ -13,8 +13,8 @@ SolidCompression=yes
 Source: "..\dist\Lancarin\*"; DestDir: "{app}"; Flags: recursesubdirs
 
 [Icons]
-Name: "{group}\Lancarin"; Filename: "{app}\Lancarin.exe"
-Name: "{autodesktop}\Lancarin"; Filename: "{app}\Lancarin.exe"
+Name: "{group}\Lancarin"; Filename: "{app}\Lancarin.exe"; IconFilename: "{app}\Lancarin.exe"; IconIndex: 0
+Name: "{autodesktop}\Lancarin"; Filename: "{app}\Lancarin.exe"; IconFilename: "{app}\Lancarin.exe"; IconIndex: 0
 
 [Run]
 Filename: "{app}\Lancarin.exe"; Description: "Jalankan Lancarin"; Flags: nowait postinstall skipifsilent

@@ -56,7 +56,16 @@ class TestBrainFixes(unittest.TestCase):
     def test_suggest_generic_labels(self):
         b = ChatBrain("REPLY: Bonjour\nMEANING: Halo")
         out = b.suggest("ctx", "hist", "Salut", "French", "Indonesian")
-        self.assertEqual(out, "Bonjour\nHalo")
+        self.assertEqual(out, [("Bonjour", "Halo")])
+
+    def test_suggest_up_to_three_options(self):
+        b = ChatBrain("REPLY1: Yes, sounds good\nMEANING1: Ya, kedengarannya bagus\n"
+                      "REPLY2: Could you repeat that?\nMEANING2: Bisa diulang?\n"
+                      "REPLY3: Let me think about it\nMEANING3: Saya pikirkan dulu")
+        out = b.suggest("ctx", "hist", "Shall we proceed?", "English", "Indonesian")
+        self.assertEqual(len(out), 3)
+        self.assertEqual(out[0], ("Yes, sounds good", "Ya, kedengarannya bagus"))
+        self.assertEqual(out[2][0], "Let me think about it")
 
     def test_summarize_long_transcript_in_chunks(self):
         b = ChatBrain("RINGKASAN")
@@ -211,7 +220,7 @@ class CombinedBrain:
     def suggest(self, *args):
         self.suggest_calls.append(args)
         time.sleep(0.8)
-        return "Suggested answer\nIts meaning"
+        return [("Suggested answer", "Its meaning")]
 
 
 class TestAppFixes(unittest.TestCase):
@@ -280,7 +289,7 @@ class TestAppFixes(unittest.TestCase):
         win.on_opponent("Hello there")
         ok = self._pump_until(lambda: win.panel_translated.text() == "Translated hello", timeout=0.5)
         self.assertTrue(ok, "translation did not appear first (still waiting for the suggestion)")
-        self.assertTrue(self._pump_until(lambda: "Suggested answer" in win.panel_suggested.text()))
+        self.assertTrue(self._pump_until(lambda: "Suggested answer" in win.suggestion_plain_text()))
         self.assertEqual(len(win.brain.calls), 1)
         self.assertEqual(len(win.brain.suggest_calls), 1)
         win.stop_streams()
@@ -463,6 +472,31 @@ class TestAppFixes(unittest.TestCase):
         self.assertIn("How was your day?", win.panel_translated.text())
         self.assertNotIn("How was your day?", win.panel_suggested.text())
         win.stop_streams()
+
+    def test_three_suggestion_options_render_and_copy(self):
+        win = self._win()
+        win.on_suggestion([("Yes, that works", "Ya, bisa"),
+                           ("Could you repeat?", "Bisa diulang?"),
+                           ("Let me check first", "Saya cek dulu")])
+        self.assertEqual(len(win._option_buttons), 3)
+        self.assertIn("Could you repeat?", win.suggestion_plain_text())
+        self.assertIn("Bisa diulang?", win.suggestion_plain_text())
+        win._option_buttons[0].click()
+        from PySide6.QtWidgets import QApplication as _QA
+        self.assertEqual(_QA.clipboard().text(), "Yes, that works")
+
+    def test_panel_font_is_unified_and_persisted(self):
+        saved = {}
+        orig_save = appmod.config.save
+        appmod.config.save = lambda cfg: saved.update(cfg)
+        try:
+            win = self._win()
+            win.btn_font_bigger.click()
+        finally:
+            appmod.config.save = orig_save
+        self.assertEqual(saved.get("panel_font"), win._panel_font)
+        self.assertIn(f"font-size:{win._panel_font}px", win.panel_original.styleSheet())
+        self.assertIn(f"font-size:{win._panel_font}px", win.panel_translated.styleSheet())
 
     def test_suggestion_failure_is_visible_in_panel(self):
         class FailBrain:

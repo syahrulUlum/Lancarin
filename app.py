@@ -26,7 +26,7 @@ class Bridge(QObject):
     mine_final = Signal(str)
     partial = Signal(str, str)  # who, text
     interim_chunk = Signal(str, str)  # source prefix covered, translated chunk
-    suggestion = Signal(str)
+    suggestion = Signal(object)  # list[(reply, meaning)] atau pesan error (str)
     private_translation = Signal(str, str)  # your text, its translation
     translation = Signal(str, str)  # original, translated
     summary_ready = Signal(str)
@@ -51,7 +51,9 @@ class MainWindow(QMainWindow):
         self.brain = None
         self.captures = []
         self.stts = []
-        self._panel_font = 22
+        # Ukuran teks panel disamakan untuk original/terjemahan/saran dan
+        # disimpan di config: pengguna tidak perlu zoom ulang tiap membuka app.
+        self._panel_font = int(self.cfg.get("panel_font") or 16)
         self.private_mode = False
         self._gen = 0  # session generation: stale thread results are dropped
         self._keywords = []
@@ -189,18 +191,24 @@ class MainWindow(QMainWindow):
         self.panel_badge.setStyleSheet(
             "color:#5eead4;font-size:12px;font-weight:700;"
             "background:#0d3c37;padding:3px 9px;border-radius:6px;")
+        # Pesan status saran (gagal/kosong); pilihan jawabannya sendiri berupa
+        # tombol-tombol opsi di suggestion_box, terpisah jelas dari terjemahan.
         self.panel_suggested = QLabel("")
         self.panel_suggested.setStyleSheet(
-            "color:#fde68a;font-size:15px;background:#3c2a04;"
+            "color:#fde68a;background:#3c2a04;"
             "padding:7px 10px;border-radius:8px;")
         self.panel_original = QLabel("")
-        self.panel_original.setStyleSheet(
-            "color:#aebdd0;font-size:14px;background:#080c12;"
-            "padding:6px 10px;border-radius:8px;")
         self.panel_translated = QLabel("")
+        self.suggestion_box = QWidget()
+        self.suggestion_layout = QVBoxLayout(self.suggestion_box)
+        self.suggestion_layout.setContentsMargins(0, 0, 0, 0)
+        self.suggestion_layout.setSpacing(5)
+        self._option_buttons: list[QPushButton] = []
+        self._suggestion_options: list[tuple[str, str]] = []
         for lab in (self.panel_badge, self.panel_suggested, self.panel_original, self.panel_translated):
             lab.setWordWrap(True)
             lab.hide()
+        self.suggestion_box.hide()
         self._apply_panel_font()
         self.btn_font_smaller = QPushButton("A−")
         self.btn_font_smaller.setToolTip("Smaller translation text")
@@ -214,13 +222,22 @@ class MainWindow(QMainWindow):
         panel_head.addWidget(self.btn_font_smaller)
         panel_head.addWidget(self.btn_font_bigger)
         lay3.addLayout(panel_head)
-        for caption, lab in (("Original", self.panel_original),
-                             ("Translation", self.panel_translated),
-                             ("Suggested reply", self.panel_suggested)):
-            cap = QLabel(caption)
-            cap.setObjectName("hint")
+
+        def _section(text):
+            cap = QLabel(text)
+            cap.setObjectName("sectionHead")
             lay3.addWidget(cap)
-            lay3.addWidget(lab)
+            return cap
+
+        # Urutan baca dibuat eksplisit per peran agar tidak tertukar:
+        # yang diucapkan klien -> artinya -> pilihan jawaban Anda.
+        self.caption_original = _section("CLIENT SAYS")
+        lay3.addWidget(self.panel_original)
+        self.caption_translated = _section("TRANSLATION")
+        lay3.addWidget(self.panel_translated)
+        self.caption_suggested = _section("YOUR REPLY OPTIONS — CLICK TO COPY")
+        lay3.addWidget(self.panel_suggested)
+        lay3.addWidget(self.suggestion_box)
         self.live_title = card3.title_label
         self.live_layout = lay3
         self.busy_bar = QProgressBar(minimum=0, maximum=0)  # spins while the AI works
@@ -364,6 +381,7 @@ class MainWindow(QMainWindow):
         for lab in (self.panel_suggested, self.panel_original, self.panel_translated):
             lab.clear()
             lab.hide()
+        self._show_suggestions([])
         self.panel_badge.hide()
         self._reset_interim()
         self._set_session_state("idle")
@@ -380,13 +398,52 @@ class MainWindow(QMainWindow):
         self.my_lang.setCurrentText(opp)
 
     def _apply_panel_font(self):
-        self.panel_translated.setStyleSheet(
-            f"color:#ffffff;font-size:{self._panel_font}px;font-weight:600;"
+        # Satu ukuran untuk ketiganya: teks klien, terjemahan, dan saran
+        # dibaca sebagai satu alur, jadi tidak ada yang mencolok sendiri.
+        n = self._panel_font
+        self.panel_original.setStyleSheet(
+            f"color:#aebdd0;font-size:{n}px;"
             "background:#080c12;padding:8px 10px;border-radius:8px;")
+        self.panel_translated.setStyleSheet(
+            f"color:#ffffff;font-size:{n}px;font-weight:600;"
+            "background:#080c12;padding:8px 10px;border-radius:8px;")
+        self.panel_suggested.setStyleSheet(
+            f"color:#fde68a;font-size:{n}px;background:#3c2a04;"
+            "padding:7px 10px;border-radius:8px;")
+        for btn in self._option_buttons:
+            btn.setStyleSheet(f"font-size:{n}px;")
 
     def _panel_zoom(self, arah: int):
-        self._panel_font = max(14, min(38, self._panel_font + 2 * arah))
+        self._panel_font = max(12, min(30, self._panel_font + 2 * arah))
         self._apply_panel_font()
+        self.cfg["panel_font"] = self._panel_font
+        config.save(self.cfg)  # pilihan ukuran dipertahankan antar-sesi aplikasi
+
+    def suggestion_plain_text(self) -> str:
+        parts = [self.panel_suggested.text()]
+        parts += [f"{r} {m}" for r, m in self._suggestion_options]
+        return " ".join(p for p in parts if p).strip()
+
+    def _show_suggestions(self, options):
+        for btn in self._option_buttons:
+            self.suggestion_layout.removeWidget(btn)
+            btn.deleteLater()
+        self._option_buttons = []
+        self._suggestion_options = list(options)
+        for i, (reply, meaning) in enumerate(self._suggestion_options, 1):
+            text = f"{i}.  {reply}" + (f"\n      {meaning}" if meaning else "")
+            btn = QPushButton(text)
+            btn.setObjectName("suggestionOption")
+            btn.setToolTip("Click to copy this reply")
+            btn.clicked.connect(lambda _=False, r=reply: self._copy_reply(r))
+            self.suggestion_layout.addWidget(btn)
+            self._option_buttons.append(btn)
+        self._apply_panel_font()
+        self.suggestion_box.setVisible(bool(self._suggestion_options))
+
+    def _copy_reply(self, reply: str):
+        QApplication.clipboard().setText(reply)
+        self.set_status("Reply copied - paste it into your call chat")
 
     def _panel_processing(self, text: str):
         self.panel_badge.setText(text)
@@ -396,8 +453,14 @@ class MainWindow(QMainWindow):
         label.setText(text)
         label.setVisible(bool(text))
 
-    def on_suggestion(self, text: str):
-        self._panel_show(self.panel_suggested, text)
+    def on_suggestion(self, payload):
+        # payload: list[(reply, meaning)] untuk opsi, atau str pesan (gagal/kosong).
+        if isinstance(payload, (list, tuple)):
+            self.panel_suggested.hide()
+            self._show_suggestions(payload)
+        else:
+            self._show_suggestions([])
+            self._panel_show(self.panel_suggested, str(payload))
         self.panel_badge.hide()  # AI work for this turn is done
 
     def set_busy(self, on: bool, text: str = ""):
@@ -571,6 +634,9 @@ class MainWindow(QMainWindow):
         self._active = True
         self._partial = ""
         self._reset_interim()
+        self.caption_original.setText(f"CLIENT SAYS · {opp.upper()}")
+        self.caption_translated.setText(f"TRANSLATION · {mine.upper()}")
+        self.caption_suggested.setText(f"YOUR REPLY OPTIONS IN {opp.upper()} — CLICK TO COPY")
         self._set_session_state("live")
         self.set_busy(False)
         self.set_status(f"Session live - translating {opp} → {mine}")
@@ -620,8 +686,8 @@ class MainWindow(QMainWindow):
                     suggestion = brain.suggest(session.context_desc, history, text, opp, mine, list(self._keywords))
                     if gen != self._gen:
                         return
-                    if suggestion.strip():
-                        self.bridge.suggestion.emit("Suggested reply: " + suggestion.replace("\n", "   ·   "))
+                    if suggestion:
+                        self.bridge.suggestion.emit(suggestion)
                     else:
                         # Panel tidak boleh diam kosong: pengguna mengira fitur rusak.
                         self.bridge.suggestion.emit("Suggestion came back empty from the AI - see the translation above.")

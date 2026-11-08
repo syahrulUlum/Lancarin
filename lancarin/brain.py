@@ -59,24 +59,37 @@ class Brain:
         )
 
     def suggest(self, context_desc: str, history: str, opponent_text: str,
-                opponent_lang: str, my_lang: str, keywords=None) -> str:
+                opponent_lang: str, my_lang: str, keywords=None) -> list[tuple[str, str]]:
+        """Up to 3 reply options as (reply, meaning) pairs, best first."""
         system = (
             "You help a non-native speaker answer live in a conversation. "
             f"The other person speaks {opponent_lang}; the user speaks {my_lang} and must reply in {opponent_lang}. "
-            "Use the full history so the reply stays coherent. "
-            "Output exactly two lines:\n"
-            f"REPLY: <natural short reply in {opponent_lang}>\n"
-            f"MEANING: <same reply translated to {my_lang}>"
+            "Use the full history so the replies stay coherent. "
+            "Give up to 3 SHORT, natural reply options with different tones/angles (not rewordings of one another). "
+            "Output ONLY in exactly this format, no intro text:\n"
+            f"REPLY1: <reply in {opponent_lang}>\nMEANING1: <same reply in {my_lang}>\n"
+            f"REPLY2: <reply in {opponent_lang}>\nMEANING2: <same reply in {my_lang}>\n"
+            f"REPLY3: <reply in {opponent_lang}>\nMEANING3: <same reply in {my_lang}>"
         )
         user = (f"Context: {context_desc or '-'}\nNames/terms: {', '.join(keywords or []) or '-'}\n\n"
                 f"History:\n{history or '-'}\n\nOther person just said: {opponent_text}")
         # Saran yang datang setelah 25 detik sudah tidak berguna untuk percakapan
         # langsung; gagal cepat lebih baik daripada panel menggantung seminit.
         raw = self.chat(system, user, timeout=25.0)
-        got = _parse(raw, "REPLY", "MEANING", "EN", "ID")
-        reply = got.get("REPLY") or got.get("EN", "")
-        meaning = got.get("MEANING") or got.get("ID", "")
-        return f"{reply}\n{meaning}" if reply else raw
+        labels = [f"{kind}{i}" for i in (1, 2, 3) for kind in ("REPLY", "MEANING")]
+        got = _parse(raw, *labels, "REPLY", "MEANING")
+        options = []
+        for i in (1, 2, 3):
+            reply = got.get(f"REPLY{i}", "").strip()
+            if reply:
+                options.append((reply, got.get(f"MEANING{i}", "").strip()))
+        if not options:  # format lama / model bandel: satu pilihan apa adanya
+            reply = (got.get("REPLY") or "").strip()
+            if reply:
+                options.append((reply, (got.get("MEANING") or "").strip()))
+            elif raw.strip():
+                options.append((raw.strip().splitlines()[0], ""))
+        return options
 
     def summarize(self, context_desc: str, transcript: str, my_lang: str) -> str:
         system = (
