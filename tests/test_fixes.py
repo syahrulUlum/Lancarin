@@ -58,6 +58,15 @@ class TestBrainFixes(unittest.TestCase):
         out = b.suggest("ctx", "hist", "Salut", "French", "Indonesian")
         self.assertEqual(out, [("Bonjour", "Halo")])
 
+    def test_suggest_prompt_forbids_evasion_and_fabrication(self):
+        b = ChatBrain("REPLY1: Not much lately\nMEANING1: Belum banyak")
+        b.suggest("ctx", "hist", "Have you watched any interesting movies lately?",
+                  "English", "Indonesian")
+        system = b.calls[0][0]
+        self.assertIn("ANSWER the question", system)
+        self.assertIn("Do NOT invent personal facts", system)
+        self.assertIn("At most ONE option may end with a short follow-up question", system)
+
     def test_suggest_up_to_three_options(self):
         b = ChatBrain("REPLY1: Yes, sounds good\nMEANING1: Ya, kedengarannya bagus\n"
                       "REPLY2: Could you repeat that?\nMEANING2: Bisa diulang?\n"
@@ -663,6 +672,17 @@ class TestStatePolish(unittest.TestCase):
         self.assertEqual(win.util_layout.direction(), QBoxLayout.Direction.LeftToRight)
         self.assertTrue(win.mode_conversation.isVisible(),
                         "mode selector must stay visible even with the Session panel collapsed")
+        self.assertTrue(win.status_pill.isHidden(),
+                        "the long status pill must yield space at narrow widths")
+        self.assertEqual(win.scroll_area.horizontalScrollBarPolicy(),
+                         appmod.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        win.on_suggestion([("This is a fairly long reply sentence that must wrap inside a narrow window",
+                            "Ini kalimat jawaban yang cukup panjang dan harus membungkus")])
+        self.assertTrue(win._option_buttons[0].reply_label.wordWrap(),
+                        "suggestion option text must wrap, not force the window wider")
+        win.resize(900, 600)
+        self.qapp.processEvents()
+        self.assertFalse(win.status_pill.isHidden())
 
     def test_setup_is_locked_while_live(self):
         win = appmod.MainWindow()

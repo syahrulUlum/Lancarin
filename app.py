@@ -16,10 +16,44 @@ from lancarin.theme import QSS, _card, is_tested, test_fingerprint
 from PySide6.QtCore import Qt, QTimer, Signal, QObject
 from PySide6.QtGui import QIcon, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QBoxLayout, QComboBox, QFileDialog, QHBoxLayout,
+    QApplication, QBoxLayout, QComboBox, QFileDialog, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit,
     QProgressBar, QPushButton, QRadioButton, QScrollArea, QTextEdit, QVBoxLayout, QWidget,
 )
+
+
+class OptionCard(QFrame):
+    """Satu pilihan jawaban: kalimat untuk diucapkan + artinya, klik = salin.
+
+    Sengaja bukan QPushButton: teks tombol Qt tidak bisa word-wrap, sehingga
+    kalimat panjang memaksa jendela lebih lebar dari layar (scrollbar
+    horizontal) saat jendela disempitkan. Label di frame ini bisa wrap.
+    """
+
+    def __init__(self, reply: str, meaning: str, on_click):
+        super().__init__()
+        self.setObjectName("suggestionOption")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.reply = reply
+        self._on_click = on_click
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(9, 7, 9, 7)
+        lay.setSpacing(2)
+        self.reply_label = QLabel(reply)
+        self.reply_label.setWordWrap(True)
+        lay.addWidget(self.reply_label)
+        self.meaning_label = None
+        if meaning:
+            self.meaning_label = QLabel(meaning)
+            self.meaning_label.setWordWrap(True)
+            lay.addWidget(self.meaning_label)
+
+    def click(self):
+        self._on_click()
+
+    def mousePressEvent(self, event):
+        self.click()
+        super().mousePressEvent(event)
 
 class Bridge(QObject):
     opponent_final = Signal(str)
@@ -72,6 +106,7 @@ class MainWindow(QMainWindow):
         _awal = ("Brain + Deepgram keys saved - ready to start" if _ready
                  else "API keys missing - open Settings & Test Connection")
         self.status_pill = QLabel("○ " + _awal)
+        self.status_pill.setWordWrap(True)
         self.status_pill.setStyleSheet(
             "color:#cbd5e1;background:#1c2939;border:1px solid #2b3f58;"
             "border-radius:12px;padding:5px 12px;font-size:12px;")
@@ -146,6 +181,7 @@ class MainWindow(QMainWindow):
             btn.setObjectName("compact")
         self._sess_state = "idle"
         self.session_state = QLabel("")
+        self.session_state.setWordWrap(True)  # teks panjang tidak boleh memaksa jendela melebar
         self.session_state.setStyleSheet(
             "color:#cbd5e1;background:#1c2939;border:1px solid #2b3f58;"
             "border-radius:9px;padding:4px 10px;font-size:12px;font-weight:600;")
@@ -161,18 +197,24 @@ class MainWindow(QMainWindow):
         util_row.addWidget(self.summary_btn)
         util_row.addWidget(export_btn)
         util_row.addStretch(1)
+        self.util_layout = util_row
         # Pemilih mode selalu terlihat (bukan di panel Session yang terlipat):
-        # mode "Translation only" yang tidak disadari = saran tidak pernah muncul.
+        # mode "Translation only" yang tidak disadari = saran tidak pernah
+        # muncul. Baris sendiri agar tidak berdesakan dengan tombol util
+        # saat jendela sempit.
+        mode_row = QHBoxLayout()
+        mode_row.setSpacing(5)
         mode_caption = QLabel("Mode:")
         mode_caption.setObjectName("hint")
-        util_row.addWidget(mode_caption)
+        mode_row.addWidget(mode_caption)
         self.mode_conversation.setText("Conversation")
         self.mode_conversation.setToolTip("Conversation (translation + reply suggestions)")
         self.mode_translate.setText("Translate only")
         self.mode_translate.setToolTip("Translation only (no reply suggestions)")
-        util_row.addWidget(self.mode_conversation)
-        util_row.addWidget(self.mode_translate)
-        self.util_layout = util_row
+        mode_row.addWidget(self.mode_conversation)
+        mode_row.addWidget(self.mode_translate)
+        mode_row.addStretch(1)
+        self.mode_layout = mode_row
 
         self.level_loop = QProgressBar(maximum=100)
         self.level_mic = QProgressBar(maximum=100)
@@ -226,6 +268,7 @@ class MainWindow(QMainWindow):
         def _section(text):
             cap = QLabel(text)
             cap.setObjectName("sectionHead")
+            cap.setWordWrap(True)
             lay3.addWidget(cap)
             return cap
 
@@ -280,11 +323,15 @@ class MainWindow(QMainWindow):
         root.addWidget(self.session_state)
         root.addLayout(action_row)
         root.addLayout(util_row)
+        root.addLayout(self.mode_layout)
         root.addWidget(self.settings_panel)
         root.addWidget(card3, 1)
         root.addWidget(self.summary_card)
         central = QWidget(); central.setLayout(root)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(central)
+        # Konten harus menyusut mengikuti jendela, bukan memaksa scroll menyamping.
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area = scroll
         self.setCentralWidget(scroll)
         self.resize(760, 580)
         self.setMinimumSize(440, 460)
@@ -358,6 +405,10 @@ class MainWindow(QMainWindow):
         # Tombol dirancang ramping: tetap sebaris di semua lebar, tidak ditumpuk.
         self.action_layout.setDirection(QBoxLayout.Direction.LeftToRight)
         self.util_layout.setDirection(QBoxLayout.Direction.LeftToRight)
+        # Di jendela sempit pill status disembunyikan: teksnya panjang dan
+        # memotong tombol Session/Settings; status sesi tetap terlihat di
+        # bilah session_state di bawahnya.
+        self.status_pill.setVisible(self.width() >= 680)
 
     def new_session(self):
         if self._active:
@@ -410,8 +461,10 @@ class MainWindow(QMainWindow):
         self.panel_suggested.setStyleSheet(
             f"color:#fde68a;font-size:{n}px;background:#3c2a04;"
             "padding:7px 10px;border-radius:8px;")
-        for btn in self._option_buttons:
-            btn.setStyleSheet(f"font-size:{n}px;")
+        for card in self._option_buttons:
+            card.reply_label.setStyleSheet(f"font-size:{n}px;color:#fde68a;font-weight:600;")
+            if card.meaning_label is not None:
+                card.meaning_label.setStyleSheet(f"font-size:{n}px;color:#c9a94e;")
 
     def _panel_zoom(self, arah: int):
         self._panel_font = max(12, min(30, self._panel_font + 2 * arah))
@@ -425,19 +478,17 @@ class MainWindow(QMainWindow):
         return " ".join(p for p in parts if p).strip()
 
     def _show_suggestions(self, options):
-        for btn in self._option_buttons:
-            self.suggestion_layout.removeWidget(btn)
-            btn.deleteLater()
+        for card in self._option_buttons:
+            self.suggestion_layout.removeWidget(card)
+            card.deleteLater()
         self._option_buttons = []
         self._suggestion_options = list(options)
         for i, (reply, meaning) in enumerate(self._suggestion_options, 1):
-            text = f"{i}.  {reply}" + (f"\n      {meaning}" if meaning else "")
-            btn = QPushButton(text)
-            btn.setObjectName("suggestionOption")
-            btn.setToolTip("Click to copy this reply")
-            btn.clicked.connect(lambda _=False, r=reply: self._copy_reply(r))
-            self.suggestion_layout.addWidget(btn)
-            self._option_buttons.append(btn)
+            card = OptionCard(f"{i}.  {reply}", meaning,
+                              lambda r=reply: self._copy_reply(r))
+            card.setToolTip("Click to copy this reply")
+            self.suggestion_layout.addWidget(card)
+            self._option_buttons.append(card)
         self._apply_panel_font()
         self.suggestion_box.setVisible(bool(self._suggestion_options))
 

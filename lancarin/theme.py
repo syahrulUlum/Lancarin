@@ -33,11 +33,10 @@ QPushButton#primary:disabled, QPushButton#danger:disabled { background: #131a24;
 QPushButton#privateBtn:checked { background: #92400e; border-color: #d97706; color: #fff7ed; }
 QPushButton#compact, QPushButton#privateBtn { padding: 3px 7px; font-size: 11px; }
 QLabel#sectionHead { color: #5eead4; font-size: 11px; font-weight: 700; padding-top: 4px; }
-QPushButton#suggestionOption {
-    background: #2a2103; color: #fde68a; border: 1px solid #6b5410;
-    border-radius: 8px; padding: 7px 10px; text-align: left;
+QFrame#suggestionOption {
+    background: #2a2103; border: 1px solid #6b5410; border-radius: 8px;
 }
-QPushButton#suggestionOption:hover { background: #3c2f05; }
+QFrame#suggestionOption:hover { background: #3c2f05; }
 QProgressBar { background: #101820; border: 1px solid #2b3a4d; border-radius: 5px; height: 10px; text-align: center; color: transparent; }
 QProgressBar::chunk { background: #0d9488; border-radius: 4px; }
 """
