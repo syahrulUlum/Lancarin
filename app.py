@@ -30,7 +30,10 @@ class OptionCard(QFrame):
     horizontal) saat jendela disempitkan. Label di frame ini bisa wrap.
     """
 
-    def __init__(self, reply: str, meaning: str, on_click):
+    # Label sikap per slot, sesuai urutan yang diwajibkan prompt brain.
+    ANGLES = ("DIRECT", "CASUAL", "ANOTHER ANGLE")
+
+    def __init__(self, reply: str, meaning: str, on_click, angle: str = ""):
         super().__init__()
         self.setObjectName("suggestionOption")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -39,6 +42,11 @@ class OptionCard(QFrame):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(9, 7, 9, 7)
         lay.setSpacing(2)
+        self.angle_label = None
+        if angle:
+            self.angle_label = QLabel(angle)
+            self.angle_label.setStyleSheet("color:#5eead4;font-size:10px;font-weight:700;")
+            lay.addWidget(self.angle_label)
         self.reply_label = QLabel(reply)
         self.reply_label.setWordWrap(True)
         lay.addWidget(self.reply_label)
@@ -484,8 +492,9 @@ class MainWindow(QMainWindow):
         self._option_buttons = []
         self._suggestion_options = list(options)
         for i, (reply, meaning) in enumerate(self._suggestion_options, 1):
+            angle = OptionCard.ANGLES[i - 1] if i <= len(OptionCard.ANGLES) else ""
             card = OptionCard(f"{i}.  {reply}", meaning,
-                              lambda r=reply: self._copy_reply(r))
+                              lambda r=reply: self._copy_reply(r), angle=angle)
             card.setToolTip("Click to copy this reply")
             self.suggestion_layout.addWidget(card)
             self._option_buttons.append(card)

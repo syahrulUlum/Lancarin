@@ -66,6 +66,10 @@ class TestBrainFixes(unittest.TestCase):
         self.assertIn("ANSWER the question", system)
         self.assertIn("Do NOT invent personal facts", system)
         self.assertIn("At most ONE option may end with a short follow-up question", system)
+        # Tiga slot sikap tetap, bukan tiga parafrase jawaban aman yang sama.
+        self.assertIn("REPLY1 = DIRECT", system)
+        self.assertIn("REPLY2 = CASUAL", system)
+        self.assertIn("REPLY3 = ANOTHER ANGLE", system)
 
     def test_suggest_up_to_three_options(self):
         b = ChatBrain("REPLY1: Yes, sounds good\nMEANING1: Ya, kedengarannya bagus\n"
@@ -488,6 +492,8 @@ class TestAppFixes(unittest.TestCase):
                            ("Could you repeat?", "Bisa diulang?"),
                            ("Let me check first", "Saya cek dulu")])
         self.assertEqual(len(win._option_buttons), 3)
+        self.assertEqual(win._option_buttons[0].angle_label.text(), "DIRECT")
+        self.assertEqual(win._option_buttons[2].angle_label.text(), "ANOTHER ANGLE")
         self.assertIn("Could you repeat?", win.suggestion_plain_text())
         self.assertIn("Bisa diulang?", win.suggestion_plain_text())
         win._option_buttons[0].click()
