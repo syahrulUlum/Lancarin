@@ -19,9 +19,10 @@
   <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0b7285" alt="Windows 10 and 11">
   <img src="https://img.shields.io/badge/speech--to--text-Deepgram%20Nova--3-0d9488" alt="Deepgram Nova-3">
   <img src="https://img.shields.io/badge/languages-55-0d9488" alt="55 languages">
+  <img src="https://img.shields.io/badge/license-MIT-0d9488" alt="MIT License">
 </p>
 
-**Contents:** [How it works](#how-it-works) · [Quick start](#quick-start) · [Features](#features) · [Supported languages](#supported-languages) · [Requirements and privacy](#requirements-and-privacy) · [Tech stack](#tech-stack) · [Development](#development) · [Limitations](#limitations)
+**Contents:** [How it works](#how-it-works) · [Quick start](#quick-start) · [Features](#features) · [Supported languages](#supported-languages) · [Requirements and privacy](#requirements-and-privacy) · [Tech stack](#tech-stack) · [Development](#development) · [Limitations](#limitations) · [License](#license)
 
 ## How it works
 
@@ -168,3 +169,7 @@ assets/                logo and icons
 - [All releases](https://github.com/syahrulUlum/Lancarin/releases)
 - [Deepgram documentation](https://developers.deepgram.com/docs)
 - [Deepgram pricing](https://deepgram.com/pricing)
+
+## License
+
+Lancarin is released under the [MIT License](LICENSE). You may use, modify, and distribute it, including commercially, as long as the copyright notice is kept.
