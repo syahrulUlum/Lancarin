@@ -11,6 +11,23 @@ from . import config
 
 CHUNK_CHARS = 8000
 
+# Rentang aksara non-Latin yang butuh bantuan "cara baca" (transliterasi):
+# Ibrani, Arab, Devanagari & aksara India lain, Thai, Myanmar, Georgia,
+# Armenia, Kiril, Yunani, Hangul, Kana, Han, Bengali, dsb.
+_NON_LATIN_RANGES = (
+    (0x0400, 0x04FF), (0x0500, 0x052F), (0x0530, 0x058F), (0x0590, 0x05FF),
+    (0x0600, 0x06FF), (0x0750, 0x077F), (0x0900, 0x097F), (0x0980, 0x09FF),
+    (0x0A00, 0x0A7F), (0x0A80, 0x0AFF), (0x0B00, 0x0B7F), (0x0B80, 0x0BFF),
+    (0x0C00, 0x0C7F), (0x0C80, 0x0CFF), (0x0D00, 0x0D7F), (0x0E00, 0x0E7F),
+    (0x1000, 0x109F), (0x10A0, 0x10FF), (0x3040, 0x30FF), (0x3400, 0x4DBF),
+    (0x4E00, 0x9FFF), (0xAC00, 0xD7AF), (0x1100, 0x11FF),
+)
+
+
+def needs_reading(text: str) -> bool:
+    """True bila teks mengandung aksara non-Latin yang perlu cara baca."""
+    return any(lo <= ord(ch) <= hi for ch in text for lo, hi in _NON_LATIN_RANGES)
+
 
 def _parse(raw: str, *labels: str) -> dict[str, str]:
     out: dict[str, str] = {}
@@ -58,9 +75,24 @@ class Brain:
             text, timeout=15.0, model=self.translate_model,
         )
 
+    def transliterate(self, text: str, lang: str) -> str:
+        """Cara baca Latin untuk teks non-Latin (pinyin/romaji/romanisasi)."""
+        if not text.strip() or not needs_reading(text):
+            return ""
+        return self.chat(
+            f"Give ONLY the Latin-alphabet pronunciation guide (transliteration) of this {lang} text, "
+            "so a beginner can read it aloud: pinyin with tone marks for Chinese, romaji for Japanese, "
+            "standard romanization for other languages. No translation, no notes, no quotes.",
+            text, timeout=15.0, model=self.translate_model,
+        )
+
     def suggest(self, context_desc: str, history: str, opponent_text: str,
-                opponent_lang: str, my_lang: str, keywords=None) -> list[tuple[str, str]]:
-        """Up to 3 reply options as (reply, meaning) pairs, best first."""
+                opponent_lang: str, my_lang: str, keywords=None) -> list[tuple[str, str, str]]:
+        """Up to 3 reply options as (reply, meaning, reading) triples, best first.
+
+        `reading` is a Latin transliteration of the reply, filled only when
+        the reply uses a non-Latin script; otherwise empty.
+        """
         system = (
             "You help a non-native speaker answer live in a conversation. "
             f"The other person speaks {opponent_lang}; the user speaks {my_lang} and must reply in {opponent_lang}. "
@@ -79,29 +111,37 @@ class Brain:
             "- Vary the openings and sentence shapes; if two options would start with the same words or make the same claim, rewrite one.\n"
             "- A generic stance without invented specifics is fine (e.g. \"a mystery novel\"), because the user picks the option that fits them.\n"
             "- Keep each reply to one easy sentence a non-native speaker can say aloud.\n"
+            f"- If {opponent_lang} uses a non-Latin script (e.g. Arabic, Chinese, Japanese, Korean, Russian, Hindi, Thai), "
+            "add a READING line after each MEANING: the reply in Latin transliteration (pinyin with tones / romaji / standard romanization) "
+            "so the user can pronounce it. Omit READING lines entirely for Latin-script languages.\n"
             "Output ONLY in exactly this format, no intro text:\n"
-            f"REPLY1: <reply in {opponent_lang}>\nMEANING1: <same reply in {my_lang}>\n"
-            f"REPLY2: <reply in {opponent_lang}>\nMEANING2: <same reply in {my_lang}>\n"
-            f"REPLY3: <reply in {opponent_lang}>\nMEANING3: <same reply in {my_lang}>"
+            f"REPLY1: <reply in {opponent_lang}>\nMEANING1: <same reply in {my_lang}>\nREADING1: <transliteration, only for non-Latin scripts>\n"
+            f"REPLY2: <reply in {opponent_lang}>\nMEANING2: <same reply in {my_lang}>\nREADING2: <transliteration, only for non-Latin scripts>\n"
+            f"REPLY3: <reply in {opponent_lang}>\nMEANING3: <same reply in {my_lang}>\nREADING3: <transliteration, only for non-Latin scripts>"
         )
         user = (f"Context: {context_desc or '-'}\nNames/terms: {', '.join(keywords or []) or '-'}\n\n"
                 f"History:\n{history or '-'}\n\nOther person just said: {opponent_text}")
         # Saran yang datang setelah 25 detik sudah tidak berguna untuk percakapan
         # langsung; gagal cepat lebih baik daripada panel menggantung seminit.
         raw = self.chat(system, user, timeout=25.0)
-        labels = [f"{kind}{i}" for i in (1, 2, 3) for kind in ("REPLY", "MEANING")]
+        labels = [f"{kind}{i}" for i in (1, 2, 3) for kind in ("REPLY", "MEANING", "READING")]
         got = _parse(raw, *labels, "REPLY", "MEANING")
         options = []
         for i in (1, 2, 3):
             reply = got.get(f"REPLY{i}", "").strip()
             if reply:
-                options.append((reply, got.get(f"MEANING{i}", "").strip()))
+                reading = got.get(f"READING{i}", "").strip()
+                # Model kadang memberi READING untuk bahasa Latin juga: buang
+                # bila kalimatnya sendiri sudah Latin, tampilkan hanya bila perlu.
+                if reading and not needs_reading(reply):
+                    reading = ""
+                options.append((reply, got.get(f"MEANING{i}", "").strip(), reading))
         if not options:  # format lama / model bandel: satu pilihan apa adanya
             reply = (got.get("REPLY") or "").strip()
             if reply:
-                options.append((reply, (got.get("MEANING") or "").strip()))
+                options.append((reply, (got.get("MEANING") or "").strip(), ""))
             elif raw.strip():
-                options.append((raw.strip().splitlines()[0], ""))
+                options.append((raw.strip().splitlines()[0], "", ""))
         return options
 
     def summarize(self, context_desc: str, transcript: str, my_lang: str) -> str:

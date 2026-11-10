@@ -1,10 +1,11 @@
 ; Inno Setup — bungkus hasil PyInstaller menjadi Lancarin-Setup.exe
 [Setup]
 AppName=Lancarin
-AppVersion=0.1.0
+AppVersion=1.0.0
+AppPublisher=Lancarin
 DefaultDirName={autopf}\Lancarin
 DefaultGroupName=Lancarin
-OutputBaseFilename=Lancarin-Setup
+OutputBaseFilename=Lancarin-Setup-1.0.0
 SetupIconFile=..\assets\lancarin.ico
 Compression=lzma2
 SolidCompression=yes

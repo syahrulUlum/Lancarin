@@ -11,20 +11,36 @@ DEEPGRAM_KEY_USER = "deepgram-api-key"
 
 STT_MODEL = "nova-3"
 # Bahasa yang bisa dipilih di UI (nama tampilan -> kode Deepgram/BCP-47).
+# Daftar mengikuti dukungan multilingual Deepgram Nova-3 (55 bahasa);
+# setiap nama WAJIB punya kode, dites di tests.test_languages.
 LANGUAGES = [
-    "Indonesian", "English", "Arabic", "Bengali", "Dutch", "French", "German",
-    "Hebrew", "Hindi", "Italian", "Japanese", "Kannada", "Korean", "Malay",
-    "Mandarin Chinese", "Marathi", "Polish", "Portuguese", "Spanish",
-    "Tagalog", "Tamil", "Telugu", "Thai", "Turkish", "Vietnamese",
+    "Afrikaans", "Arabic", "Belarusian", "Bengali", "Bosnian", "Bulgarian",
+    "Catalan", "Chinese (Cantonese)", "Chinese (Mandarin)", "Croatian",
+    "Czech", "Danish", "Dutch", "English", "Estonian", "Finnish", "Flemish",
+    "French", "Galician", "German", "Greek", "Gujarati", "Hebrew", "Hindi",
+    "Hungarian", "Indonesian", "Italian", "Japanese", "Kannada", "Korean",
+    "Latvian", "Lithuanian", "Macedonian", "Malay", "Marathi", "Norwegian",
+    "Persian", "Polish", "Portuguese", "Romanian", "Russian", "Serbian",
+    "Slovak", "Slovenian", "Spanish", "Swedish", "Tagalog", "Tamil",
+    "Telugu", "Thai", "Turkish", "Ukrainian", "Vietnamese", "Xhosa", "Zulu",
 ]
 LANGUAGE_CODES = {
-    "Indonesian": "id", "English": "en", "Arabic": "ar", "Bengali": "bn",
-    "Dutch": "nl", "French": "fr", "German": "de", "Hebrew": "he",
-    "Hindi": "hi", "Italian": "it", "Japanese": "ja", "Kannada": "kn",
-    "Korean": "ko", "Malay": "ms", "Mandarin Chinese": "zh", "Marathi": "mr",
-    "Polish": "pl", "Portuguese": "pt", "Spanish": "es", "Tagalog": "tl",
-    "Tamil": "ta", "Telugu": "te", "Thai": "th", "Turkish": "tr",
-    "Vietnamese": "vi",
+    "Afrikaans": "af", "Arabic": "ar", "Belarusian": "be", "Bengali": "bn",
+    "Bosnian": "bs", "Bulgarian": "bg", "Catalan": "ca",
+    "Chinese (Cantonese)": "zh-HK", "Chinese (Mandarin)": "zh",
+    "Mandarin Chinese": "zh",  # nama lama di config pengguna terdahulu
+    "Croatian": "hr", "Czech": "cs", "Danish": "da", "Dutch": "nl",
+    "English": "en", "Estonian": "et", "Finnish": "fi", "Flemish": "nl-BE",
+    "French": "fr", "Galician": "gl", "German": "de", "Greek": "el",
+    "Gujarati": "gu", "Hebrew": "he", "Hindi": "hi", "Hungarian": "hu",
+    "Indonesian": "id", "Italian": "it", "Japanese": "ja", "Kannada": "kn",
+    "Korean": "ko", "Latvian": "lv", "Lithuanian": "lt", "Macedonian": "mk",
+    "Malay": "ms", "Marathi": "mr", "Norwegian": "no", "Persian": "fa",
+    "Polish": "pl", "Portuguese": "pt", "Romanian": "ro", "Russian": "ru",
+    "Serbian": "sr", "Slovak": "sk", "Slovenian": "sl", "Spanish": "es",
+    "Swedish": "sv", "Tagalog": "tl", "Tamil": "ta", "Telugu": "te",
+    "Thai": "th", "Turkish": "tr", "Ukrainian": "uk", "Vietnamese": "vi",
+    "Xhosa": "xh", "Zulu": "zu",
 }
 
 DEFAULTS = {

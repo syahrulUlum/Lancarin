@@ -56,7 +56,7 @@ class TestBrainFixes(unittest.TestCase):
     def test_suggest_generic_labels(self):
         b = ChatBrain("REPLY: Bonjour\nMEANING: Halo")
         out = b.suggest("ctx", "hist", "Salut", "French", "Indonesian")
-        self.assertEqual(out, [("Bonjour", "Halo")])
+        self.assertEqual(out, [("Bonjour", "Halo", "")])
 
     def test_suggest_prompt_forbids_evasion_and_fabrication(self):
         b = ChatBrain("REPLY1: Not much lately\nMEANING1: Belum banyak")
@@ -71,13 +71,28 @@ class TestBrainFixes(unittest.TestCase):
         self.assertIn("REPLY2 = CASUAL", system)
         self.assertIn("REPLY3 = ANOTHER ANGLE", system)
 
+    def test_needs_reading_detects_non_latin(self):
+        self.assertTrue(brain_mod.needs_reading("مرحبا بالعالم"))
+        self.assertTrue(brain_mod.needs_reading("最近怎么样"))
+        self.assertTrue(brain_mod.needs_reading("おはようございます"))
+        self.assertTrue(brain_mod.needs_reading("Привет, как дела"))
+        self.assertFalse(brain_mod.needs_reading("Hello, how are you?"))
+        self.assertFalse(brain_mod.needs_reading("Halo, apa kabar?"))
+
+    def test_suggest_reading_only_for_non_latin_reply(self):
+        b = ChatBrain("REPLY1: 最近忙しいです\nMEANING1: Akhir-akhir ini saya sibuk\nREADING1: saikin isogashii desu\n"
+                      "REPLY2: 元気です\nMEANING2: Saya baik\nREADING2: genki desu")
+        out = b.suggest("ctx", "hist", "最近どうですか", "Japanese", "Indonesian")
+        self.assertEqual(out[0], ("最近忙しいです", "Akhir-akhir ini saya sibuk", "saikin isogashii desu"))
+        self.assertEqual(out[1][2], "genki desu")
+
     def test_suggest_up_to_three_options(self):
         b = ChatBrain("REPLY1: Yes, sounds good\nMEANING1: Ya, kedengarannya bagus\n"
                       "REPLY2: Could you repeat that?\nMEANING2: Bisa diulang?\n"
                       "REPLY3: Let me think about it\nMEANING3: Saya pikirkan dulu")
         out = b.suggest("ctx", "hist", "Shall we proceed?", "English", "Indonesian")
         self.assertEqual(len(out), 3)
-        self.assertEqual(out[0], ("Yes, sounds good", "Ya, kedengarannya bagus"))
+        self.assertEqual(out[0], ("Yes, sounds good", "Ya, kedengarannya bagus", ""))
         self.assertEqual(out[2][0], "Let me think about it")
 
     def test_summarize_long_transcript_in_chunks(self):
@@ -499,6 +514,17 @@ class TestAppFixes(unittest.TestCase):
         win._option_buttons[0].click()
         from PySide6.QtWidgets import QApplication as _QA
         self.assertEqual(_QA.clipboard().text(), "Yes, that works")
+
+    def test_suggestion_card_shows_reading_for_non_latin(self):
+        win = self._win()
+        win.on_suggestion([("最近忙しいです", "Akhir-akhir ini saya sibuk", "saikin isogashii desu"),
+                           ("Hello there", "Halo", "")])
+        card = win._option_buttons[0]
+        self.assertIsNotNone(card.reading_label)
+        self.assertEqual(card.reading_label.text(), "saikin isogashii desu")
+        self.assertIn("isogashii", win.suggestion_plain_text())
+        self.assertIsNone(win._option_buttons[1].reading_label,
+                          "Latin replies must not show a reading line")
 
     def test_panel_font_is_unified_and_persisted(self):
         saved = {}

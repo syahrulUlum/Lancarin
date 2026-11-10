@@ -33,7 +33,7 @@ class OptionCard(QFrame):
     # Label sikap per slot, sesuai urutan yang diwajibkan prompt brain.
     ANGLES = ("DIRECT", "CASUAL", "ANOTHER ANGLE")
 
-    def __init__(self, reply: str, meaning: str, on_click, angle: str = ""):
+    def __init__(self, reply: str, meaning: str, on_click, angle: str = "", reading: str = ""):
         super().__init__()
         self.setObjectName("suggestionOption")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -50,6 +50,14 @@ class OptionCard(QFrame):
         self.reply_label = QLabel(reply)
         self.reply_label.setWordWrap(True)
         lay.addWidget(self.reply_label)
+        self.reading_label = None
+        if reading:
+            # Cara baca Latin tepat di bawah kalimat non-Latinnya, agar bisa
+            # langsung diucapkan tanpa menebak aksaranya.
+            self.reading_label = QLabel(reading)
+            self.reading_label.setWordWrap(True)
+            self.reading_label.setStyleSheet("color:#7dd3fc;font-style:italic;")
+            lay.addWidget(self.reading_label)
         self.meaning_label = None
         if meaning:
             self.meaning_label = QLabel(meaning)
@@ -70,6 +78,7 @@ class Bridge(QObject):
     interim_chunk = Signal(str, str)  # source prefix covered, translated chunk
     suggestion = Signal(object)  # list[(reply, meaning)] atau pesan error (str)
     private_translation = Signal(str, str)  # your text, its translation
+    reading = Signal(str, str)  # panel ("original"/"translated"), transliteration
     translation = Signal(str, str)  # original, translated
     summary_ready = Signal(str)
     status = Signal(str)
@@ -284,8 +293,12 @@ class MainWindow(QMainWindow):
         # yang diucapkan klien -> artinya -> pilihan jawaban Anda.
         self.caption_original = _section("CLIENT SAYS")
         lay3.addWidget(self.panel_original)
+        self.panel_reading_original = self._reading_label()
+        lay3.addWidget(self.panel_reading_original)
         self.caption_translated = _section("TRANSLATION")
         lay3.addWidget(self.panel_translated)
+        self.panel_reading_translated = self._reading_label()
+        lay3.addWidget(self.panel_reading_translated)
         self.caption_suggested = _section("YOUR REPLY OPTIONS — CLICK TO COPY")
         lay3.addWidget(self.panel_suggested)
         lay3.addWidget(self.suggestion_box)
@@ -353,6 +366,7 @@ class MainWindow(QMainWindow):
         self.bridge.interim_chunk.connect(self.on_interim_chunk)
         self.bridge.suggestion.connect(self.on_suggestion)
         self.bridge.private_translation.connect(self.on_private_translation)
+        self.bridge.reading.connect(self.on_reading)
         self.bridge.translation.connect(self.on_translation)
         self.bridge.summary_ready.connect(self.on_summary)
         self.bridge.status.connect(self.set_status)
@@ -437,7 +451,8 @@ class MainWindow(QMainWindow):
         self.summary_card.hide()
         self.summary_btn.setEnabled(False)
         self.log.clear()
-        for lab in (self.panel_suggested, self.panel_original, self.panel_translated):
+        for lab in (self.panel_suggested, self.panel_original, self.panel_translated,
+                    self.panel_reading_original, self.panel_reading_translated):
             lab.clear()
             lab.hide()
         self._show_suggestions([])
@@ -471,6 +486,8 @@ class MainWindow(QMainWindow):
             "padding:7px 10px;border-radius:8px;")
         for card in self._option_buttons:
             card.reply_label.setStyleSheet(f"font-size:{n}px;color:#fde68a;font-weight:600;")
+            if card.reading_label is not None:
+                card.reading_label.setStyleSheet(f"font-size:{n}px;color:#7dd3fc;font-style:italic;")
             if card.meaning_label is not None:
                 card.meaning_label.setStyleSheet(f"font-size:{n}px;color:#c9a94e;")
 
@@ -482,7 +499,7 @@ class MainWindow(QMainWindow):
 
     def suggestion_plain_text(self) -> str:
         parts = [self.panel_suggested.text()]
-        parts += [f"{r} {m}" for r, m in self._suggestion_options]
+        parts += [" ".join(x for x in opt if x) for opt in self._suggestion_options]
         return " ".join(p for p in parts if p).strip()
 
     def _show_suggestions(self, options):
@@ -490,11 +507,17 @@ class MainWindow(QMainWindow):
             self.suggestion_layout.removeWidget(card)
             card.deleteLater()
         self._option_buttons = []
-        self._suggestion_options = list(options)
-        for i, (reply, meaning) in enumerate(self._suggestion_options, 1):
+        # Normalisasi: brain lama/pihak ketiga boleh memberi (reply, meaning)
+        # tanpa reading; brain Lancarin memberi (reply, meaning, reading).
+        self._suggestion_options = [
+            (opt[0], opt[1] if len(opt) > 1 else "", opt[2] if len(opt) > 2 else "")
+            for opt in options
+        ]
+        for i, (reply, meaning, reading) in enumerate(self._suggestion_options, 1):
             angle = OptionCard.ANGLES[i - 1] if i <= len(OptionCard.ANGLES) else ""
             card = OptionCard(f"{i}.  {reply}", meaning,
-                              lambda r=reply: self._copy_reply(r), angle=angle)
+                              lambda r=reply: self._copy_reply(r), angle=angle,
+                              reading=reading)
             card.setToolTip("Click to copy this reply")
             self.suggestion_layout.addWidget(card)
             self._option_buttons.append(card)
@@ -512,6 +535,35 @@ class MainWindow(QMainWindow):
     def _panel_show(self, label: QLabel, text: str):
         label.setText(text)
         label.setVisible(bool(text))
+
+    @staticmethod
+    def _reading_label() -> QLabel:
+        lab = QLabel("")
+        lab.setWordWrap(True)
+        lab.setStyleSheet("color:#7dd3fc;font-style:italic;padding:2px 10px;")
+        lab.hide()
+        return lab
+
+    def _request_reading(self, kind: str, text: str, lang: str):
+        """Minta transliterasi di thread latar; hanya untuk aksara non-Latin."""
+        if not self.brain or not brain_mod.needs_reading(text):
+            return
+        brain, gen = self.brain, self._gen
+
+        def work():
+            try:
+                reading = brain.transliterate(text, lang)
+                if reading and gen == self._gen:
+                    self.bridge.reading.emit(kind, reading)
+            except Exception:
+                pass  # cara baca hanya pelengkap; gagal tidak mengganggu sesi
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def on_reading(self, kind: str, text: str):
+        label = (self.panel_reading_original if kind == "original"
+                 else self.panel_reading_translated)
+        self._panel_show(label, text)
 
     def on_suggestion(self, payload):
         # payload: list[(reply, meaning)] untuk opsi, atau str pesan (gagal/kosong).
@@ -715,7 +767,10 @@ class MainWindow(QMainWindow):
         self._partial = ""
         self._reset_interim()
         self.panel_badge.hide()
+        self.panel_reading_original.hide()
+        self.panel_reading_translated.hide()
         opp, mine = self.cfg["opponent_lang"], self.cfg["my_lang"]
+        self._request_reading("original", text, opp)
         turn = self.session.add("Other", text)
         self.log.append(f"<b>Other:</b> {html.escape(text)}")
         self._panel_show(self.panel_original, text)
@@ -788,6 +843,7 @@ class MainWindow(QMainWindow):
         opp = self.cfg["opponent_lang"]
         self._panel_show(self.panel_original, original)
         self._panel_show(self.panel_translated, translated)
+        self._request_reading("translated", translated, opp)
         self._panel_processing(f"● YOUR SPEECH IN {opp.upper()}")
         self.log.append(f"<i>→ ({html.escape(opp)}) {html.escape(translated)}</i>")
 
@@ -798,6 +854,7 @@ class MainWindow(QMainWindow):
             self.log.append("<i>→ (empty from AI)</i>")
             return
         self._panel_show(self.panel_translated, translated)
+        self._request_reading("translated", translated, self.cfg["my_lang"])
         if self.cfg["mode"] == "conversation":
             self._panel_processing("⏳ Translation shown - preparing a suggestion…")
         else:

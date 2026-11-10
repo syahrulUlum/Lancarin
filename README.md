@@ -1,20 +1,94 @@
 # Lancarin
 
-A real-time desktop assistant that captures and translates audio from Zoom,
-Meet, and YouTube, then suggests English replies that fit the conversation.
-Built for Indonesian professionals. Live transcription by Deepgram Nova-3
-Multilingual (streaming); translation, reply suggestions, and summaries by
-any OpenAI-compatible brain provider configured in Settings (Groq by default).
+**Version 1.0.0** — A real-time desktop conversation assistant for Windows.
 
-Full plan: [docs/rencana.md](docs/rencana.md)
+Lancarin listens to your Zoom / Google Meet calls (or any audio playing on
+your PC, e.g. YouTube), transcribes the other party live, translates what
+they say into your language while they are still speaking, and offers up to
+**3 suggested replies** — each with its meaning in your language and, for
+non-Latin scripts (Arabic, Chinese, Japanese, Korean, Russian, …), a
+Latin-alphabet **reading guide** so you can pronounce the reply. Built for
+Indonesian professionals who work with international clients.
 
-Code layout: `app.py` (main window) uses the `lancarin/` package
-(`config`, `audio`, `stt`, `brain`, `session`, `theme`, `settings_dialog`).
-Logo assets live in `assets/`, packaging in `packaging/`, tests in `tests/`.
+Full plan (Indonesian): [docs/rencana.md](docs/rencana.md)
 
-## Running (development)
+## Features
 
-Requirements: Python 3.15 and a headset (prevents echo).
+- **Live streaming transcription** — interim text appears while the other
+  party is still talking; no waiting for silence.
+- **Interim translation in chunks** — each new clause is translated and
+  appended, so long speeches stay understandable in near real time.
+- **Up to 3 reply suggestions** with different stances — **DIRECT**,
+  **CASUAL**, and **ANOTHER ANGLE** — each shown with its meaning; click a
+  card to copy the reply into your call chat.
+- **Reading guide (transliteration)** — pinyin with tones, romaji, and
+  standard romanizations under non-Latin text: the client's words, the
+  translation, and every suggested reply.
+- **55 languages** from Deepgram Nova-3 Multilingual, with automatic
+  code-switching hints for your selected language pair.
+- **Private Speech Check (F9)** — practice your own speech and see its
+  translation, without sending anything to the call.
+- **Session summary & Markdown export** — topic, key points, decisions,
+  follow-ups, and new vocabulary, generated at the end of a session.
+- **Provider freedom** — the AI brain is any OpenAI-compatible API; switch
+  provider or model from Settings without an app update.
+
+## Technology
+
+| Part | Technology |
+|---|---|
+| Desktop UI | [PySide6](https://doc.qt.io/qtforpython-6/) (Qt for Python) |
+| Speech-to-text (streaming) | [Deepgram Nova-3 Multilingual](https://developers.deepgram.com/docs/models-languages-overview) over WebSocket |
+| Translation, suggestions, summaries, transliteration | Any [OpenAI-compatible](https://platform.openai.com/docs/api-reference/chat) Chat Completions API via the `openai` Python SDK |
+| Audio capture | [PyAudioWPatch](https://pypi.org/project/PyAudioWPatch/) (Windows WASAPI loopback + microphone) |
+| Secret storage | [keyring](https://pypi.org/project/keyring/) (Windows Credential Manager) |
+| Packaging | [PyInstaller](https://pyinstaller.org/) + [Inno Setup](https://jrsoftware.org/isinfo.php) |
+
+Recommended brain providers (fast inference matters for live use):
+[Groq](https://console.groq.com/docs/models) (default),
+[OpenAI](https://platform.openai.com/docs/models),
+[OpenRouter](https://openrouter.ai/models),
+[Cerebras](https://www.cerebras.ai/). Small models (e.g. 3B) often produce
+repetitive suggestions; a mid-size suggestion model noticeably improves
+reply quality while the translation model can stay small and fast.
+
+## Requirements
+
+- Windows 10/11 (WASAPI loopback is Windows-specific)
+- A **headset** (prevents the other party's audio echoing into your mic)
+- A **Deepgram API key** — sign up at <https://deepgram.com> (pay-as-you-go,
+  about $0.35/hour of streaming)
+- A **brain API key** from any OpenAI-compatible provider above
+- Internet connection (all transcription and AI calls are cloud APIs)
+
+For development: Python 3.15 and the packages in `requirements.txt`.
+
+## Quick start (end users)
+
+1. Download `Lancarin-Setup-1.0.0.exe` from the
+   [v1.0.0 release](https://github.com/syahrulUlum/Lancarin/releases/tag/v1.0.0)
+   and run it. Windows SmartScreen may warn about an unsigned installer —
+   choose *More info → Run anyway*.
+2. Open Lancarin → **Settings**:
+   - Section 1: paste your **Deepgram API key**.
+   - Section 2: **Base URL**, **Brain API key**, **Translation model**, and
+     **Suggestions & summary model** (free text — any model your provider
+     offers). Defaults are prefilled for Groq.
+   - Run **Test Connection** until every line shows a checkmark, then **Save**.
+3. Back on the main window: open **Session** if you want to add context
+   (e.g. "Sales call with a new client"), pick the other party's language
+   and yours (55 languages), and set **Mode** — *Conversation* enables reply
+   suggestions; *Translate only* disables them.
+4. Press **Start**. The live panel shows, in order: what the client says,
+   its translation (A−/A+ adjusts one shared text size, remembered between
+   runs), then your reply options. Click a reply card to copy it.
+5. **End** builds the session summary in-app. **Export** saves the full
+   transcript as Markdown. **New** clears the board for the next call.
+
+Note: Private Speech Check never forwards your audio to the call app;
+muting your Zoom/Meet microphone is still up to you.
+
+## Running from source (development)
 
 ```powershell
 python -m venv .venv
@@ -22,51 +96,51 @@ python -m venv .venv
 .venv\Scripts\python app.py
 ```
 
-The application UI is in English by default.
-
-1. Click **Settings**. Section 1: enter your Deepgram API key (from
-   deepgram.com) for live transcription. Section 2: enter the brain Base URL,
-   API key, translation model, and suggestions/summary model - any
-   OpenAI-compatible endpoint works (Groq, OpenAI, OpenRouter, Cerebras);
-   model names are free text. Run **Test Connection** - each model is tested
-   separately - until every line shows a checkmark, and **Save**. Start
-   Session stays locked until the test passes.
-2. Open the **Session** menu if needed: add context (optional), pick the
-   other party's language and yours, and choose a mode. The menu is
-   collapsed by default so the conversation panel stays spacious.
-3. **Start Session** - play a video or call; the in-app panel shows the
-   transcript, a large translation (A-/A+ buttons), and a suggested reply.
-   `F9` toggles Private Speech Check.
-4. **End and Summarize** - the summary appears as a card inside the app
-   (copyable, reopenable via **View Summary**, exportable), not a popup.
-   **New Session** clears the board for the next conversation.
-
-Note: private mode never forwards your audio to the call app; muting your
-Zoom/Meet microphone is still up to you. Local STT fallback and macOS/Linux
-adapters are tracked in the GitHub backlog issues.
-
-## Measured results (development machine, Nov 2026)
-
-- Connection test passes. Translation uses the selected translation model
-  and appears first; the suggested reply follows in parallel from the
-  suggestions model. (Historical Meta-provider measurements: ~2.5s
-  translation, ~8s total; Deepgram + OpenAI-compatible brain latency still
-  to be re-measured.)
-- Interim translation now works in chunks: each new sentence fragment is
-  translated and appended while the other party keeps speaking, instead
-  of re-translating the whole partial transcript.
-- Real STT (TTS speech to loopback to WebSocket): partials stream every
-  ~0.3s and the final lands exactly when speech ends.
-- Idle app: about 123 MB RAM. Six-question interview scenario: suggestions
-  stay coherent with the context and history.
-- Not yet verified: the installer on a clean machine, a 60-minute
-  session, and private mode with a second device (tracked in issue #8).
-
-## Building the Windows installer
+Run the test suite:
 
 ```powershell
-.venv\Scripts\python -m PyInstaller packaging\lancarin.spec
+.venv\Scripts\python -m unittest discover -s tests
 ```
 
-Output lands in `dist\Lancarin\`. Wrap it with Inno Setup using
-`packaging\installer.iss` (version 0.1.0).
+## Building the installer
+
+```powershell
+.venv\Scripts\python -m PyInstaller packaging\lancarin.spec --noconfirm
+& "C:\Program Files\Inno Setup 7\ISCC.exe" packaging\installer.iss
+```
+
+Output: `packaging\Output\Lancarin-Setup-1.0.0.exe` (application version
+1.0.0, Start Menu + desktop shortcuts with the Lancarin icon).
+
+## Privacy & costs
+
+- Audio is streamed to Deepgram and conversation text to your chosen brain
+  provider; nothing is sent anywhere else. API keys live in the Windows
+  Credential Manager, never in config files.
+- Typical cost per hour of meeting: Deepgram ≈ $0.35 + your brain
+  provider's per-token charges (usually a few cents with small models).
+
+## Known limitations
+
+- Windows only (audio loopback); macOS/Linux adapters are not implemented.
+- Latency depends on your network and provider region; the design target
+  is under ~1 second from the end of a clause to its translation/suggestion.
+- Transliteration quality depends on the brain model; it is a reading aid,
+  not a pronunciation guarantee.
+- Not yet verified: the installer on a clean machine, a 60-minute session,
+  and private mode with a second device.
+
+## Project layout
+
+`app.py` (main window) uses the `lancarin/` package (`config`, `audio`,
+`stt`, `brain`, `session`, `theme`, `settings_dialog`). Logo assets live in
+`assets/`, packaging in `packaging/`, tests in `tests/`.
+
+## Links
+
+- Deepgram documentation: <https://developers.deepgram.com/docs>
+- Deepgram pricing: <https://deepgram.com/pricing>
+- Groq models & docs: <https://console.groq.com/docs/models>
+- OpenAI API reference: <https://platform.openai.com/docs/api-reference/chat>
+- OpenRouter models: <https://openrouter.ai/models>
+- Releases: <https://github.com/syahrulUlum/Lancarin/releases>
